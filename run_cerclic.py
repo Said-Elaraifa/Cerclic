@@ -1,9 +1,16 @@
-"""Frozen-app entry point used by PyInstaller."""
+"""Entry point of Cerclic.exe (PyInstaller) and of `pythonw run_cerclic.py`."""
 import multiprocessing
+import os
 import sys
 
-from cerclic.app import main
-
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
+    # A windowed app has no console: give libraries that print somewhere to
+    # write (first, so that worker processes get it too).
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    multiprocessing.freeze_support()   # a worker process stops here
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from cerclic.launcher import main
     sys.exit(main())

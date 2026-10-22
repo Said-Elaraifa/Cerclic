@@ -1,19 +1,18 @@
-"""Resolve the file(s) the user has selected where the cursor is.
+"""The files selected in the window the user is working in (for the shortcut).
 
-Uses only the documented Shell automation model (Shell.Application):
-  * Explorer windows: the window under the cursor is matched by handle and its
-    selected items are read. With Windows 11 tabs, several entries share one
-    window handle, so the active tab is picked by its title and selection.
-  * Desktop: located with IShellWindows.FindWindowSW(SWC_DESKTOP), whose
-    folder view exposes the same SelectedItems() call.
-If nothing resolves, the caller falls back to a file picker.
+Uses the documented Shell automation model (Shell.Application):
+  * Explorer window in front: its selected items. With Windows 11 tabs, several
+    entries share one window; the active tab is the one whose browser window
+    is the first ShellTabWindowClass child (fallback: the tab named like the
+    window title, then any tab with a selection).
+  * Desktop in front: located with IShellWindows.FindWindowSW(SWC_DESKTOP).
+Anything else returns an empty list (the caller then explains what to do).
 """
 from __future__ import annotations
 
 import ctypes
 import os
 import sys
-from ctypes import wintypes
 
 from ..log import log
 
@@ -35,48 +34,45 @@ def _add_pywin32_dll_dir() -> None:
 _add_pywin32_dll_dir()
 
 try:
-    import win32gui
-    import win32com.client
     import pythoncom
+    import win32com.client
+    import win32gui
     _PYWIN32 = True
 except Exception:  # pragma: no cover - only importable on Windows
     _PYWIN32 = False
 
-user32 = ctypes.windll.user32 if os.name == "nt" else None
-
 GA_ROOT = 2
 EXPLORER_CLASSES = {"CabinetWClass", "ExploreWClass"}
+DESKTOP_CLASSES = {"Progman", "WorkerW"}
 SWC_DESKTOP = 8
 SWFO_NEEDDISPATCH = 1
+SID_STopLevelBrowser = "{4C96BE40-915C-11CF-99D3-00AA004AE837}"
 
 
-def _root_window_at_cursor() -> tuple[int, str, str]:
-    pt = wintypes.POINT()
-    user32.GetCursorPos(ctypes.byref(pt))
-    hwnd = user32.WindowFromPoint(pt)
+def _foreground_root() -> tuple[int, str, str]:
+    user32 = ctypes.windll.user32
+    hwnd = user32.GetForegroundWindow()
     if not hwnd:
         return 0, "", ""
-    root = user32.GetAncestor(hwnd, GA_ROOT)
+    root = user32.GetAncestor(hwnd, GA_ROOT) or hwnd
     return root, win32gui.GetClassName(root), win32gui.GetWindowText(root)
 
 
-def selected_paths() -> list[str]:
-    """Best-effort list of selected file paths under the cursor."""
+def foreground_selection() -> list[str]:
+    """Best-effort list of the files selected in the foreground window."""
     if not (_PYWIN32 and os.name == "nt"):
         return []
     pythoncom.CoInitialize()
     try:
-        root, cls, title = _root_window_at_cursor()
-        log(f"fenêtre sous le curseur : {cls!r} {title!r}")
+        root, cls, title = _foreground_root()
+        log(f"fenêtre au premier plan : {cls!r} {title!r}")
         if cls in EXPLORER_CLASSES:
-            paths = _explorer_selection(root, title)
-            if paths:
-                return paths
-        paths = _desktop_selection()
-        log(f"lecture du Bureau : {len(paths)} fichier(s)")
-        return paths
+            return _explorer_selection(root, title)
+        if cls in DESKTOP_CLASSES:
+            return _desktop_selection()
+        return []
     except Exception as exc:
-        log(f"erreur sélection : {exc!r}")
+        log(f"erreur de lecture de la sélection : {exc!r}")
         return []
     finally:
         pythoncom.CoUninitialize()
@@ -85,32 +81,65 @@ def selected_paths() -> list[str]:
 def _items_to_paths(items) -> list[str]:
     out = []
     for i in range(items.Count):
-        p = items.Item(i).Path
-        if p and os.path.exists(p):
+        try:
+            p = items.Item(i).Path
+        except Exception:
+            continue
+        if p and os.path.isfile(p):
             out.append(p)
     return out
 
 
+def _tab_browser_hwnd(window) -> int:
+    """Window handle of the tab behind a Shell.Application entry (0 if unknown)."""
+    try:
+        from win32com.shell import shell as _shell  # registers IShellBrowser
+        sp = window._oleobj_.QueryInterface(pythoncom.IID_IServiceProvider)
+    except Exception:
+        return 0
+    for service in (_shell.IID_IShellBrowser, SID_STopLevelBrowser):
+        try:
+            browser = sp.QueryService(service, _shell.IID_IShellBrowser)
+            return int(browser.GetWindow())
+        except Exception:
+            continue
+    return 0
+
+
 def _explorer_selection(hwnd: int, title: str) -> list[str]:
     shell = win32com.client.Dispatch("Shell.Application")
-    candidates = []
+    tabs = []
     for window in shell.Windows():
         try:
             if int(window.HWND) != int(hwnd):
                 continue
-            paths = _items_to_paths(window.Document.SelectedItems())
-            name = str(window.LocationName or "")
-            candidates.append((name, paths))
+            tabs.append(window)
         except Exception:
             continue
-    if not candidates:
+    if not tabs:
         return []
-    # Windows 11 tabs: prefer the tab whose name matches the window title,
-    # then any tab that has a selection.
-    for name, paths in candidates:
+    if len(tabs) == 1:
+        return _items_to_paths(tabs[0].Document.SelectedItems())
+    active = win32gui.FindWindowEx(hwnd, 0, "ShellTabWindowClass", None)
+    if active:
+        for window in tabs:
+            if _tab_browser_hwnd(window) == active:
+                try:
+                    return _items_to_paths(window.Document.SelectedItems())
+                except Exception:
+                    break
+    # Fallback: the tab named like the window, then any tab with a selection.
+    found = []
+    for window in tabs:
+        try:
+            paths = _items_to_paths(window.Document.SelectedItems())
+            found.append((str(window.LocationName or ""), paths))
+        except Exception:
+            continue
+    for name, paths in found:
         if paths and name and name in title:
             return paths
-    for _, paths in candidates:
+    for _, paths in found:
         if paths:
             return paths
     return []
@@ -118,14 +147,15 @@ def _explorer_selection(hwnd: int, title: str) -> list[str]:
 
 def _desktop_selection() -> list[str]:
     shell = win32com.client.Dispatch("Shell.Application")
-    windows = shell.Windows()
     try:
-        res = windows.FindWindowSW(0, pythoncom.Empty, SWC_DESKTOP, 0,
-                                   SWFO_NEEDDISPATCH)
+        res = shell.Windows().FindWindowSW(0, pythoncom.Empty, SWC_DESKTOP, 0,
+                                           SWFO_NEEDDISPATCH)
     except Exception as exc:
         log(f"FindWindowSW a échoué : {exc!r}")
         return []
-    desktop = res[0] if isinstance(res, tuple) else res
+    # (the window object, with the handle as an extra out value)
+    cands = res if isinstance(res, tuple) else (res,)
+    desktop = next((c for c in cands if c is not None and not isinstance(c, int)), None)
     if desktop is None:
         return []
     try:

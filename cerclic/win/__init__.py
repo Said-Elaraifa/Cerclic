@@ -1,5 +1,7 @@
-"""Windows-only glue: global mouse hook, Explorer selection, autostart.
+"""Windows-only glue: right-click entry and autostart (registry), keyboard
+shortcut (RegisterHotKey), selection of the window in front (Shell automation),
+bringing Cerclic's windows to the front.
 
-These modules import ctypes/pywin32 and only run on Windows. They are kept out
-of the pure `actions` package so the engine stays testable everywhere.
+Nothing here watches the mouse or the keyboard: Cerclic only reacts when the
+user picks its menu entry or presses its own shortcut.
 """

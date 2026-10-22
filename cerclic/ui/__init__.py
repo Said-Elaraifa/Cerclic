@@ -1,1 +1,1 @@
-"""PySide6 UI: the radial menu, crop overlay, result toast, settings."""
+"""PySide6 interface: wheel, bubbles, cards, editors, settings."""

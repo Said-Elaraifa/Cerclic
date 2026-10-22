@@ -1,95 +1,85 @@
 # Cerclic
 
-Un menu circulaire d'actions rapides sur tes fichiers, sous Windows.
+Une roue d'actions rapides sur tes fichiers, sous Windows 10 et 11.
 
-Maintiens le clic gauche sur une image, un PDF ou une vidéo : une roue
-d'actions s'ouvre autour du curseur. Tu choisis, c'est fait, le résultat est
-enregistré à côté de l'original. Aucune application à ouvrir.
+![Aperçu de la roue](docs/preview_image.png)
 
-![Aperçu du menu](docs/preview_image.png)
+## Ouvrir la roue
 
-## Le principe
+- **Clic droit sur un fichier, puis « Cerclic »** (tout en haut du menu). La
+  roue s'ouvre sous ta souris. Ça marche dans l'Explorateur, sur le Bureau et
+  dans les fenêtres Ouvrir/Enregistrer de toutes les applications, avec un ou
+  plusieurs fichiers (jusqu'à 100 d'un coup).
+- **Ctrl+Alt+Espace** sur les fichiers sélectionnés dans l'Explorateur ou sur
+  le Bureau.
+- **Glisse des fichiers sur l'icône Cerclic** du Bureau.
 
-- **Maintiens le clic gauche** (environ 0,4 s, sans bouger) sur un fichier.
-  Un clic normal, un double clic ou un glisser restent inchangés.
-- La roue montre les actions qui conviennent au type de fichier.
-- Un clic lance l'action. Une petite notification propose « Ouvrir »,
-  « Dossier » et « Annuler ».
-- Rien n'écrase jamais ton fichier d'origine : chaque résultat est un nouveau
-  fichier, nommé clairement (`photo (compressed).jpg`).
+Sous Windows 11, l'entrée se trouve dans « Afficher d'autres options » (ou
+Maj + clic droit). Pour l'avoir en un clic : Paramètres de Cerclic, « Menu clic
+droit complet ».
 
-## Ce que Cerclic sait faire (v1)
+Dans la roue : clic sur une action, clic au centre pour revenir, Échap pour
+fermer. Les touches 1 à 9 et les flèches marchent aussi.
 
-**Images** : rogner (avec formats 1:1, 4:5, 9:16...), convertir en JPG, PNG ou
-WEBP, convertir les photos iPhone HEIC en JPG, compresser, redimensionner,
-pivoter, assembler plusieurs images en un PDF.
+## Ce que Cerclic sait faire
 
-**PDF** : en JPG ou PNG, en Word, compresser, fusionner, diviser, pivoter,
-signer (ta signature se règle une fois dans les paramètres), filigrane,
-numéros de page, protéger par mot de passe, déverrouiller.
+Tout se passe dans Cerclic, sans ouvrir d'autre application. Ton fichier
+d'origine n'est jamais modifié : chaque résultat est un nouveau fichier à côté,
+par exemple `photo (compressed).jpg`, et « Annuler » le supprime.
 
-**Vidéo** : compresser, convertir en MP4, en GIF, extraire le son en MP3.
+**Images** (JPG, PNG, WEBP, HEIC d'iPhone, AVIF, GIF, BMP, TIFF) : rogner dans
+un éditeur plein écran (formats 1:1, 4:5, 16:9...), convertir en JPG, PNG ou
+WEBP, compresser, redimensionner (50 %, 1920, 1280 ou 800 px), pivoter, réunir
+en un PDF. Les GIF animés gardent leur animation, les couleurs et les infos
+EXIF sont conservées.
 
-Les actions les plus utiles sont dans le premier cercle ; les autres sont
-regroupées par catégorie. D'autres actions et des sous-menus arriveront.
+**PDF** : signer (tu dessines ta signature une fois, puis tu la poses à la
+souris sur la page), rogner, compresser, fusionner, convertir en images ou en
+Word, diviser, pivoter, filigrane, numéros de page, protéger par mot de passe,
+déverrouiller. Un PDF protégé demande son mot de passe dans une petite bulle.
+
+**Vidéo** : compresser, convertir en MP4 lisible partout, en GIF, extraire le
+son en MP3. Une barre montre l'avancement, « Arrêter » interrompt proprement.
 
 ## Installer
 
-Télécharge `CerclicSetup` dans la section
-[Releases](../../releases), lance-le, c'est tout. Cerclic se place dans la
-barre des tâches (près de l'horloge) et démarre avec Windows.
+Télécharge `CerclicSetup-x.y.z.exe` et lance-le : pas de droits
+administrateur, pas de Python à installer, rien à configurer. Cerclic démarre
+avec Windows et se range près de l'horloge.
 
-Une version portable (dossier `.zip`, sans installation) est aussi fournie.
+Windows peut afficher « Windows a protégé votre ordinateur » car l'application
+n'est pas encore signée numériquement : clique sur « Informations
+complémentaires », puis « Exécuter quand même ».
+
+Une version portable (`Cerclic-x.y.z-portable.zip`) est aussi fournie :
+décompresse-la où tu veux et double-clique sur `Cerclic.exe`.
 
 ## Réglages
 
-Clic droit sur l'icône dans la barre des tâches, puis « Paramètres » :
+Clic droit sur l'icône près de l'horloge, puis « Paramètres » : entrée du clic
+droit, menu complet de Windows 11, raccourci clavier, signature (dessiner,
+importer une photo de ta signature), qualité de compression, démarrage avec
+Windows.
 
-- **Signature** : choisis une image PNG à fond transparent ; « Signer » la
-  posera sur le PDF.
-- **Geste** : clic gauche maintenu (par défaut), clic droit maintenu, ou
-  double clic droit.
-- **Délai** : durée d'appui avant que la roue s'ouvre.
-- Qualités par défaut (compression, JPG, redimension).
+En cas de souci, le journal `cerclic.log` se trouve dans
+`%APPDATA%\Cerclic`.
 
-## Tester sans installer
+## Désinstaller
 
-1. Décompresse le zip et ouvre le dossier `Cerclic`.
-2. Double-clique **« Lancer Cerclic.bat »**. Le premier lancement installe ce
-   qu'il faut (Python doit être installé), les suivants démarrent tout de suite.
-3. Un message « Cerclic est prêt » s'affiche : maintiens le clic gauche sur un
-   fichier, la roue s'ouvre.
+Paramètres Windows, Applications, Cerclic, Désinstaller. Tout ce que Cerclic a
+ajouté (entrée du clic droit, démarrage automatique) est retiré.
 
-## Construire depuis le code
-
-Le build Windows se fait tout seul sur GitHub (voir
-`.github/workflows/build.yml`) : il teste, compile l'exécutable et fabrique
-l'installateur à chaque envoi sur `main`, et publie une release sur un tag
-`vX.Y.Z`.
-
-En local (Windows) :
+## Pour les développeurs
 
 ```
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements-dev.txt
-pytest
-python -m cerclic          # lancer en mode développeur
-pyinstaller cerclic.spec   # fabriquer l'exécutable
+pytest                      # 70+ tests : actions, interface, communication
+pythonw run_cerclic.py      # lancer depuis le code
 ```
 
-## Tester entre amis
-
-1. Un tag `v0.1.0` déclenche la compilation et publie `CerclicSetup` dans
-   Releases.
-2. Partage le lien de la release. Chacun télécharge, installe, teste.
-3. Les retours et les bugs se notent dans les Issues du dépôt.
-
-## Pile technique
-
-Python, PySide6 pour la roue et les fenêtres, Pillow et pillow-heif pour les
-images, PyMuPDF et pikepdf pour les PDF, pdf2docx pour le Word, ffmpeg pour la
-vidéo. Le geste global et la lecture de la sélection de l'Explorateur passent
-par l'API Windows.
-
-ffmpeg est inclus dans l'installateur ; voir `docs/THIRD_PARTY.md`.
+Construire l'application : le workflow GitHub (`.github/workflows/build.yml`)
+fabrique l'exécutable, l'installateur et la version portable sur Windows ;
+`scripts/build_windows.sh` fait la même chose depuis Linux avec Wine. Détails
+dans `docs/ARCHITECTURE.md`.

@@ -1,327 +1,789 @@
-"""Cerclic application: tray icon, global gesture, radial menu, action runner.
+"""The resident Cerclic: tray icon, request server, wheel, editors and jobs.
 
-Flow: the mouse hook detects the gesture and fires `Bridge.fire` (a queued
-signal, so the handler runs on the GUI thread); the handler reads the current
-selection, shows the radial menu, gathers any extra input the chosen action
-needs, then runs it in a worker thread and shows a result toast.
+Flow: a request arrives (right-click entry through the pipe, or the keyboard
+shortcut) -> the wheel opens at the cursor -> the chosen action gathers what it
+needs (password, text, crop frame, signature placement) in Cerclic's own
+windows -> it runs on a worker thread -> a card shows progress, then the result.
 """
 from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
 
-from PySide6.QtCore import QObject, Signal, Qt, QThread
-from PySide6.QtWidgets import (QApplication, QSystemTrayIcon, QMenu,
-                               QFileDialog, QMessageBox)
+from PySide6.QtCore import (QEventLoop, QObject, QPoint, Qt, QTimer, Signal,
+                            qInstallMessageHandler)
+from PySide6.QtGui import QCursor
+from PySide6.QtNetwork import QLocalServer
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
-from . import APP_NAME, __version__, engine
-from .settings import Settings
+from . import APP_NAME, __version__, engine, launcher
 from .actions import registry
-from .ui.radial import RadialMenu
-from .ui.crop import CropDialog
-from .ui.toast import Toast
-from .ui.dialogs import ask_password, ask_text, Busy
-from .ui.settings_window import SettingsWindow
-from .ui.trayicon import make_icon
-from .log import log, log_path
+from .log import log, log_exception, log_path
+from .paths import clean_selection, fallback_folder, kind_of, natural_key
+from .settings import Settings
+
+# A right-click on many files starts one forwarder per file: paths arriving
+# less than MERGE_GAP s after the previous one join the wheel already open.
+MERGE_GAP = 1.0
+MERGE_MAX = 60.0
 
 
 def _summary(paths: list[str]) -> str:
     if len(paths) == 1:
         name = os.path.basename(paths[0])
-        return name if len(name) <= 22 else name[:19] + "..."
+        return name if len(name) <= 26 else name[:23] + "…"
     return f"{len(paths)} fichiers"
 
 
-class Bridge(QObject):
-    fire = Signal(int, int)
-    status = Signal(bool, str)
+def _elsewhere_note(sources: list[str], outputs: list[str]) -> str:
+    """Say so when results could not go next to the original (protected folder)."""
+    if not sources or not outputs:
+        return ""
+    folders = {os.path.normcase(os.path.dirname(os.path.abspath(s))) for s in sources}
+
+    def beside(out: str) -> bool:
+        out = os.path.normcase(os.path.abspath(out))
+        for d in folders:
+            try:
+                if os.path.commonpath([d, out]) == d:
+                    return True
+            except ValueError:          # another drive
+                pass
+        return False
+
+    if all(beside(o) for o in outputs):
+        return ""
+    fb = fallback_folder()
+    where = os.path.basename(fb.rstrip("\\/")) or fb
+    where = {"downloads": "Téléchargements"}.get(where.lower(), where)  # as Explorer shows it
+    return f"Enregistré dans «\u00a0{where}\u00a0» : le dossier d'origine est protégé."
 
 
-class Worker(QThread):
-    done = Signal(object)
+# ----- request server ---------------------------------------------------------------
 
-    def __init__(self, action_id, paths, opts):
+class RequestServer(QObject):
+    """Receives requests from later launches (see launcher.py)."""
+    request = Signal(str, list)
+
+    def __init__(self, name: str):
         super().__init__()
-        self._args = (action_id, paths, opts)
+        self.server = QLocalServer(self)
+        self.server.setSocketOptions(QLocalServer.UserAccessOption)
+        if os.name != "nt":
+            QLocalServer.removeServer(name)
+        self.ok = self.server.listen(name)
+        if not self.ok:
+            log(f"serveur local indisponible : {self.server.errorString()}")
+        self.server.newConnection.connect(self._on_connection)
+        self._live: dict = {}
 
-    def run(self):
-        self.done.emit(engine.run(*self._args))
+    def _on_connection(self) -> None:
+        while self.server.hasPendingConnections():
+            sock = self.server.nextPendingConnection()
+            buf = bytearray()
+            self._live[sock] = buf
+            sock.readyRead.connect(lambda s=sock: self._read(s))
+            sock.disconnected.connect(lambda s=sock: self._drop(s))
+            QTimer.singleShot(5000, lambda s=sock: self._timeout(s))
+            if sock.bytesAvailable():
+                self._read(sock)
 
+    def _read(self, sock) -> None:
+        buf = self._live.get(sock)
+        if buf is None:
+            return
+        buf += bytes(sock.readAll())
+        if b"\nEND\n" not in buf:
+            if len(buf) > 4_000_000:
+                sock.abort()
+            return
+        parsed = launcher.decode(bytes(buf))
+        self._live.pop(sock, None)
+        try:
+            sock.write(b"OK\n")
+            sock.flush()
+            sock.disconnectFromServer()
+        except RuntimeError:
+            pass
+        if parsed:
+            self.request.emit(parsed[0], parsed[1])
+
+    def _drop(self, sock) -> None:
+        self._live.pop(sock, None)
+        try:
+            sock.deleteLater()
+        except RuntimeError:
+            pass
+
+    def _timeout(self, sock) -> None:
+        if sock in self._live:
+            self._live.pop(sock, None)
+            try:
+                sock.abort()
+            except RuntimeError:
+                pass
+
+
+QUIT_WINDOW_TITLE = "Cerclic.Quit"
+
+
+class _QuitWindow(QWidget):
+    """Invisible window the installer closes (WM_CLOSE) to stop Cerclic
+    cleanly, without having to start any program."""
+
+    def __init__(self, on_close):
+        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint)
+        self.setWindowTitle(QUIT_WINDOW_TITLE)
+        self._on_close = on_close
+        self.winId()        # create the native window, never shown
+
+    def closeEvent(self, e):
+        e.ignore()
+        QTimer.singleShot(0, self._on_close)
+
+
+class Bridge(QObject):
+    """Signals emitted from other threads, delivered on the GUI thread."""
+    hotkey = Signal()
+    hotkey_status = Signal(bool)
+    selection = Signal(int, list)
+
+
+class Job(QObject):
+    progress = Signal(object, str)
+    done = Signal(object)
+    _ids = 0
+
+    def __init__(self, action_id: str, paths: list[str], opts: dict, journal=None):
+        super().__init__()
+        Job._ids += 1
+        self.id = f"{os.getpid()}-{Job._ids}"
+        self.action_id, self.paths, self.opts = action_id, paths, opts
+        self.journal = journal
+        self.cancel_event = threading.Event()
+        self.finished = False
+
+    def start(self) -> None:
+        threading.Thread(target=self._run, daemon=True, name="cerclic-job").start()
+
+    def _run(self) -> None:
+        from . import jobs
+        from .journal import set_current_job
+        set_current_job(self.id)
+        try:
+            res = jobs.run_job(
+                self.action_id, self.paths, self.opts,
+                on_progress=lambda f, t: self.progress.emit(f, t),
+                cancel=self.cancel_event,
+                on_reserved=(lambda p: self.journal.add(self.id, p)) if self.journal else None)
+        except BaseException as exc:  # never lose the card
+            log_exception("tâche")
+            res = engine.Result(self.action_id, False, [], engine.friendly_error(exc))
+        finally:
+            set_current_job(None)
+            if self.journal:
+                self.journal.finish(self.id)
+        try:
+            self.done.emit(res)
+        except RuntimeError:
+            pass
+
+
+# ----- the wheel session --------------------------------------------------------------
+
+class WheelSession:
+    def __init__(self, app: "CerclicApp", paths: list[str], pos: QPoint, source: str):
+        from .ui.radial import Wheel
+        self.app, self.paths, self.pos, self.source = app, paths, pos, source
+        self.created = self.last_add = time.monotonic()
+        self._keys = {os.path.normcase(p) for p in paths}
+        self._refresh_pending = False
+        self.closed = False
+        menu = registry.menu_for(paths)
+        self.wheel = Wheel(menu, registry.count_by_category(paths), _summary(paths))
+        self.wheel.chosen.connect(self._chosen)
+        self.wheel.cancelled.connect(self.close)
+        self.wheel.popup_at(pos)
+        log("roue ouverte : " + ", ".join(menu.keys()) + f" ({len(paths)} fichier(s))")
+
+    def can_merge(self) -> bool:
+        now = time.monotonic()
+        return (not self.closed and self.source == "menu" and not self.wheel.navigated
+                and now - self.last_add < MERGE_GAP and now - self.created < MERGE_MAX)
+
+    def add(self, paths: list[str]) -> None:
+        """Merge already-cleaned paths. The wheel is refreshed once per burst,
+        not once per file, so even a big selection merges in no time."""
+        self.last_add = time.monotonic()
+        grew = False
+        for p in paths:
+            key = os.path.normcase(p)
+            if key not in self._keys:
+                self._keys.add(key)
+                self.paths.append(p)
+                grew = True
+        if grew and not self._refresh_pending:
+            self._refresh_pending = True
+            QTimer.singleShot(30, self._refresh)
+
+    def _refresh(self) -> None:
+        self._refresh_pending = False
+        if self.closed:
+            return
+        self.paths.sort(key=lambda p: (natural_key(p), p.lower()))
+        try:
+            self.wheel.set_menu(registry.menu_for(self.paths),
+                                registry.count_by_category(self.paths),
+                                _summary(self.paths))
+        except RuntimeError:
+            pass
+
+    def _chosen(self, action_id: str, opts: dict) -> None:
+        self.close()
+        self.paths.sort(key=lambda p: (natural_key(p), p.lower()))
+        self.app.start_action(action_id, self.paths, opts, self.pos)
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            if self.wheel.isVisible():
+                self.wheel.cancel()
+        except RuntimeError:
+            pass
+        if self.app.session is self:
+            self.app.session = None
+
+
+# ----- application ----------------------------------------------------------------------
 
 class CerclicApp(QObject):
-    def __init__(self, app: QApplication):
+    def __init__(self, qapp: QApplication):
         super().__init__()
-        self.app = app
+        from .ui.cards import CardStack
+        self.qapp = qapp
         self.settings = Settings.load()
-        self._refs = []            # keep transient windows alive
-        self._radial = None
-        self._busy = None
-        self._worker = None
-        self._active = False       # a gesture is being handled
+        self.cards = CardStack()
+        self._recover_unfinished()
+        self.session: WheelSession | None = None
+        self._live: set = set()           # editors, bubbles, jobs kept alive
+        self._settings_win = None
+        self._reading_selection = 0     # number of the read in progress (0: none)
+        self._reading_since = 0.0
+        self._reads = 0
+        self.hotkey = None
+        self.hotkey_ok = None
 
         self.bridge = Bridge()
-        self.bridge.fire.connect(self._on_gesture, Qt.QueuedConnection)
-        self.bridge.status.connect(self._on_hook_status, Qt.QueuedConnection)
+        self.bridge.hotkey.connect(self._on_hotkey, Qt.QueuedConnection)
+        self.bridge.hotkey_status.connect(self._on_hotkey_status, Qt.QueuedConnection)
+        self.bridge.selection.connect(self._on_selection, Qt.QueuedConnection)
 
+        self.server = RequestServer(launcher.server_name())
+        self.server.request.connect(self.handle_request)
+        self._quit_window = _QuitWindow(self.quit)
         self._build_tray()
-        self._start_hook()
-        self._apply_autostart()
+        self.apply_integration()
 
-    # -- tray ----------------------------------------------------------------
-    def _build_tray(self):
-        self.tray = QSystemTrayIcon(make_icon(), self.app)
+    # -- interrupted actions -------------------------------------------------------------
+    def _recover_unfinished(self) -> None:
+        """Remove what an abruptly stopped previous run left half-written, then
+        note every path the coming actions reserve until they finish."""
+        from . import paths as _paths
+        from .journal import Journal, current_job
+        from .settings import config_dir
+        self.journal = Journal(os.path.join(config_dir(), "pending.json"))
+        for p in self.journal.recover():
+            log(f"fichier inachevé retiré : {p}")
+        _paths.add_reserve_hook(lambda p: self.journal.add(current_job(), p))
+
+    # -- tray ------------------------------------------------------------------------
+    def _build_tray(self) -> None:
+        from .ui.trayicon import make_icon
+        self.tray = QSystemTrayIcon(make_icon(), self.qapp)
         self.tray.setToolTip(f"{APP_NAME} {__version__}")
         menu = QMenu()
+        menu.addAction("Comment ça marche ?", lambda: self.show_help(False))
         menu.addAction("Paramètres", self.open_settings)
-        menu.addAction("À propos", self._about)
         menu.addSeparator()
-        menu.addAction("Quitter", self.quit)
+        menu.addAction("Quitter Cerclic", self.quit)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self._tray_activated)
         self.tray.show()
         self._menu = menu
-        hint = {"left_hold": "Maintiens le clic gauche sur un fichier",
-                "right_hold": "Maintiens le clic droit sur un fichier",
-                "double_right": "Double clic droit sur un fichier"}.get(
-                    self.settings.get("gesture"), "Sélectionne un fichier")
-        hint += ", ou appuie sur Ctrl+Alt+Espace."
-        self.tray.showMessage("Cerclic est prêt", hint,
-                              QSystemTrayIcon.Information, 4000)
 
-    def _tray_activated(self, reason):
+    def _tray_activated(self, reason) -> None:
         if reason == QSystemTrayIcon.DoubleClick:
             self.open_settings()
+        elif reason == QSystemTrayIcon.Trigger:
+            self.show_help(False)
 
-    def _about(self):
-        box = QMessageBox()
-        box.setWindowTitle("À propos de Cerclic")
-        box.setText(
-            f"<b>{APP_NAME}</b> {__version__}<br><br>"
-            "Maintiens le clic gauche sur un fichier pour ouvrir le menu d'actions (geste réglable).<br>"
-            "Images, PDF et vidéos, sans ouvrir d'application.")
-        box.exec()
+    # -- integration -------------------------------------------------------------------
+    def apply_integration(self) -> None:
+        if os.environ.get("CERCLIC_NO_INTEGRATION"):   # tests: leave Windows alone
+            return
+        if os.name == "nt":
+            from .win import shell
+            try:
+                if self.settings.get("context_menu"):
+                    if not shell.context_menu_ok():
+                        shell.install_context_menu()
+                        log("entrée « Cerclic » ajoutée au clic droit")
+                else:
+                    shell.remove_context_menu()
+            except Exception:
+                log_exception("clic droit : échec de l'installation")
+            try:
+                shell.set_autostart(bool(self.settings.get("autostart")))
+            except Exception:
+                log_exception("démarrage avec Windows : échec")
+        self._apply_hotkey()
 
-    # -- hook ----------------------------------------------------------------
-    def _start_hook(self):
-        from .win.mouse_hook import GestureHook
-        self.hook = GestureHook(
-            on_trigger=lambda x, y: self.bridge.fire.emit(x, y),
-            mode=self.settings.get("gesture"),
-            double_ms=int(self.settings.get("double_ms")),
-            hold_ms=int(self.settings.get("hold_ms")),
-            on_status=lambda ok, detail: self.bridge.status.emit(ok, detail))
-        self.hook.start()
+    def _apply_hotkey(self) -> None:
+        want = bool(self.settings.get("hotkey")) and os.name == "nt"
+        if want and self.hotkey is None:
+            from .win.hotkey import Hotkey
+            self.hotkey = Hotkey(on_hotkey=self.bridge.hotkey.emit,
+                                 on_status=self.bridge.hotkey_status.emit)
+            self.hotkey.start()
+        elif not want and self.hotkey is not None:
+            self.hotkey.stop()
+            self.hotkey = None
 
-    def _on_hook_status(self, ok: bool, detail: str):
+    def _on_hotkey_status(self, ok: bool) -> None:
+        self.hotkey_ok = ok
         if not ok:
-            self.tray.showMessage(
-                "Cerclic : geste souris indisponible",
-                f"{detail}. Le raccourci Ctrl+Alt+Espace reste utilisable.",
-                QSystemTrayIcon.Warning, 8000)
+            from .win.hotkey import LABEL
+            self.message(f"Raccourci {LABEL} indisponible",
+                         "Une autre application l'utilise déjà. Le clic droit "
+                         "« Cerclic » marche toujours.", kind="warn")
 
-    def _restart_hook(self):
+    # -- requests ------------------------------------------------------------------------
+    def handle_request(self, cmd: str, paths: list) -> None:
+        log(f"demande : {cmd} ({len(paths)} fichier(s))")
         try:
-            self.hook.stop()
+            if cmd == "open":
+                self.open_wheel(paths, source="menu")
+            elif cmd == "hello":
+                self.show_help(True)
+            elif cmd == "settings":
+                self.open_settings()
+            elif cmd == "quit":
+                self.quit()
         except Exception:
-            pass
-        self._start_hook()
+            log_exception(f"demande {cmd} a échoué")
+            self.message("Cerclic a rencontré un problème",
+                         f"Les détails sont dans {log_path()}", kind="error")
 
-    def _apply_autostart(self):
+    def _on_hotkey(self) -> None:
+        # One read at a time; a read stuck on a frozen Explorer window does not
+        # block the shortcut for more than a few seconds (its late answer is dropped).
+        if self._reading_selection and time.monotonic() - self._reading_since < 4:
+            return
+        self._reads += 1
+        n = self._reads
+        self._reading_selection = n
+        self._reading_since = time.monotonic()
+
+        def read():
+            try:
+                from .win.selection import foreground_selection
+                paths = foreground_selection()
+            except Exception:
+                log_exception("lecture de la sélection")
+                paths = []
+            self.bridge.selection.emit(n, paths)
+
+        threading.Thread(target=read, daemon=True, name="cerclic-selection").start()
+
+    def _on_selection(self, n: int, paths: list) -> None:
+        if n != self._reading_selection:
+            return
+        self._reading_selection = 0
+        self.open_wheel(paths, source="hotkey")
+
+    # -- wheel ---------------------------------------------------------------------------
+    def open_wheel(self, paths: list, source: str = "menu") -> None:
+        asked = list(paths)
+        paths = clean_selection(paths)
+        if self.session is not None and source == "menu" and self.session.can_merge():
+            self.session.add([p for p in paths if kind_of(p) != "other"])
+            return
+        supported = [p for p in paths if kind_of(p) != "other"]
+        if not supported:
+            if asked and not paths:
+                self.message("Fichier inaccessible",
+                             "Ce fichier n'est pas dans un dossier normal (archive ZIP, "
+                             "téléphone…). Copie-le dans un dossier, puis réessaie.")
+            elif paths:
+                self.message("Aucune action pour ce type de fichier",
+                             "Cerclic travaille sur les images, les PDF et les vidéos.")
+            else:
+                from .win.hotkey import LABEL
+                self.message("Sélectionne d'abord un fichier",
+                             f"Clique sur une image, un PDF ou une vidéo dans "
+                             f"l'Explorateur ou sur le Bureau, puis appuie sur {LABEL}. "
+                             "Ou fais un clic droit sur le fichier, puis « Cerclic ».")
+            return
+        if self.session is not None:
+            self.session.close()
+        self.session = WheelSession(self, supported, QCursor.pos(), source)
+
+    # -- action flow -------------------------------------------------------------------------
+    def start_action(self, action_id: str, paths: list[str], choice_opts: dict,
+                     pos: QPoint) -> None:
+        action = registry.get(action_id)
+        files = registry.files_for(action, paths)
+        if not files:
+            return
+        opts = {"quality": int(self.settings.get("compress_quality")),
+                "jpg_quality": int(self.settings.get("jpg_quality"))}
+        opts.update(choice_opts)
+        log(f"action {action_id} sur {len(files)} fichier(s)")
+        self._drive(self._flow(action, files, opts, pos))
+
+    def _drive(self, gen, value=None) -> None:
+        """Run a flow: each `yield ask` shows a window and resumes with its answer."""
         try:
-            from .win.autostart import set_autostart
-            set_autostart(bool(self.settings.get("autostart")))
+            ask = gen.send(value)
+        except StopIteration:
+            return
         except Exception:
-            pass
-
-    # -- gesture handling ----------------------------------------------------
-    def _on_gesture(self, x: int, y: int):
-        if self._active:
-            log("geste ignoré : une roue est déjà ouverte")
+            log_exception("déroulé d'une action")
+            self.message("Cerclic a rencontré un problème",
+                         f"Les détails sont dans {log_path()}", kind="error")
             return
-        paths = self._current_selection()
-        log(f"sélection lue : {len(paths)} fichier(s) "
-            + ", ".join(os.path.basename(p) for p in paths[:5]))
-        if not paths:
-            log("aucune sélection lue, ouverture du sélecteur de fichiers")
-            paths = self._pick_files()
-        if not paths:
-            return
-        menu = registry.menu_for(paths)
-        if not menu:
-            log("aucune action pour ces fichiers")
-            self._toast_info("Aucune action pour ce type de fichier")
-            return
-        log("roue ouverte : " + ", ".join(menu.keys()))
-        self._active = True
-        self._selection = paths
-        self._radial = RadialMenu(menu, _summary(paths),
-                                  theme=self.settings.get("ring_theme"),
-                                  primary_only=bool(self.settings.get("primary_only")))
-        self._radial.selected.connect(self._on_action)
-        self._radial.cancelled.connect(self._on_cancel)
-        self._radial.popup_at(x, y)
+        ask(lambda result: self._drive(gen, result))
 
-    def _current_selection(self):
-        try:
-            from .win.selection import selected_paths
-            return selected_paths()
-        except Exception as exc:
-            log(f"erreur de lecture de la sélection : {exc!r}")
-            return []
-
-    def _pick_files(self):
-        files, _ = QFileDialog.getOpenFileNames(
-            None, "Cerclic, choisir un ou plusieurs fichiers")
-        return files
-
-    def _on_cancel(self):
-        self._active = False
-        self._radial = None
-
-    def _on_action(self, action_id: str):
-        self._radial = None
-        paths = registry.paths_for_action(action_id, self._selection)
-        log(f"action {action_id} sur {len(paths)} fichier(s)")
-        opts = self._base_opts()
-        try:
-            if not self._gather_needs(action_id, paths, opts):
-                self._active = False
-                return
-        except Exception as exc:
-            self._active = False
-            self._toast_info(f"Annulé : {exc}")
-            return
-        self._busy = Busy(f"{registry.get(action_id).label}...")
-        self._busy.show()
-        self._worker = Worker(action_id, paths, opts)
-        self._worker.done.connect(self._on_done)
-        self._worker.start()
-
-    def _base_opts(self) -> dict:
-        return {
-            "quality": int(self.settings.get("compress_quality")),
-            "max_side": int(self.settings.get("resize_max_side")),
-            "signature": self.settings.get("signature"),
-            "degrees": 90,
-        }
-
-    def _gather_needs(self, action_id, paths, opts) -> bool:
-        """Fill opts for any required input. Return False if the user cancels."""
-        for key in engine.missing_inputs(action_id, opts):
-            if key == "crop_box":
-                box = CropDialog.get_box(paths[0])
-                if not box:
-                    return False
-                opts["crop_box"] = box
-            elif key == "signature":
+    def _flow(self, action, files, opts, pos):
+        from .actions import pdf as pdf_actions
+        if action.id in registry.PASSWORD_AWARE:
+            locked = [f for f in files if pdf_actions.needs_password(f)]
+            if locked:
+                hint = f"« {os.path.basename(locked[0])} » est protégé."
+                for _attempt in range(4):
+                    pw = yield self._ask_text("Mot de passe du PDF", hint, pos,
+                                              password=True, ok_label="Déverrouiller")
+                    if pw is None:
+                        return
+                    if all(pdf_actions.password_ok(f, pw) for f in locked):
+                        break
+                    hint = "Mot de passe incorrect. Réessaie."
+                else:
+                    self.message("Mot de passe incorrect", "Le PDF n'a pas été modifié.",
+                                 kind="error")
+                    return
+                opts["password"] = pw
+        for need in action.needs:
+            if need == "crop":
+                from .ui.crop_editor import CropEditor
+                res = yield self._ask_editor(
+                    lambda: CropEditor(files[0], opts.get("password")))
+                if res is None:
+                    return
+                opts.update(res)
+            elif need == "place_sig":
                 sig = self.settings.get("signature")
                 if not sig or not os.path.exists(sig):
-                    QMessageBox.information(
-                        None, "Cerclic",
-                        "Ajoute d'abord ta signature dans les paramètres.")
-                    self.open_settings()
-                    return False
-                opts["signature"] = sig
-            elif key == "password":
-                pw = ask_password("Mot de passe du PDF :")
-                if not pw:
-                    return False
-                opts["password"] = pw
-            elif key == "text":
-                txt = ask_text("Texte du filigrane :", "CONFIDENTIEL")
-                if not txt:
-                    return False
+                    from .ui.signature import SignaturePad
+                    res = yield self._ask_editor(SignaturePad)
+                    if res is None:
+                        return
+                    sig = res["signature"]
+                    self.settings.set("signature", sig)
+                    self.settings.save()
+                from .ui.signature import SignPlacer
+                res = yield self._ask_editor(
+                    lambda: SignPlacer(files[0], sig, opts.get("password")))
+                if res is None:
+                    return
+                if res["signature"] != self.settings.get("signature"):
+                    self.settings.set("signature", res["signature"])
+                    self.settings.save()
+                opts.update(res)
+            elif need == "text":
+                txt = yield self._ask_text("Texte du filigrane",
+                                           "Il sera écrit en diagonale sur chaque page.",
+                                           pos, default="CONFIDENTIEL")
+                if txt is None:
+                    return
                 opts["text"] = txt
-        # unlock: optional password, ask once if the file looks encrypted
-        if action_id == "pdf_unlock":
-            pw = ask_password("Mot de passe (laisser vide si aucun) :")
-            opts["password"] = pw or ""
-        return True
+            elif need == "new_password":
+                pw = yield self._ask_text("Mot de passe à mettre",
+                                          "Il sera demandé pour ouvrir le PDF. "
+                                          "L'original reste sans mot de passe.",
+                                          pos, password=True, ok_label="Protéger")
+                if pw is None:
+                    return
+                opts["new_password"] = pw
+        self._run_job(action, files, opts, pos, attempts=0)
 
-    def _on_done(self, result):
-        if self._busy:
-            self._busy.close()
-            self._busy = None
-        self._active = False
-        log(f"résultat {result.action_id} : "
-            + (f"ok, {len(result.outputs)} fichier(s)" if result.ok
-               else f"échec, {result.error}"))
-        label = registry.get(result.action_id).label
-        toast = Toast(label if result.ok else f"{label} a échoué",
-                      result.outputs, ok=result.ok, error=result.error)
-        toast.show()
-        self._refs = [w for w in self._refs if w.isVisible()]
-        self._refs.append(toast)
+    def _ask_text(self, title, subtitle, pos, password=False, default="",
+                  ok_label="OK"):
+        def ask(cb):
+            from .ui.bubble import PromptBubble
+            bubble = PromptBubble(title, subtitle, password=password, default=default,
+                                  ok_label=ok_label)
+            state = {"done": False}
 
-    def _toast_info(self, text: str):
-        toast = Toast(text, [], ok=False, error="")
-        toast.show()
-        self._refs.append(toast)
+            def finish(value):
+                if state["done"]:
+                    return
+                state["done"] = True
+                self._live.discard(bubble)
+                cb(value)
 
-    # -- settings ------------------------------------------------------------
-    def open_settings(self):
-        win = SettingsWindow(self.settings, on_apply=self._settings_applied)
-        win.exec()
+            bubble.accepted.connect(finish)
+            bubble.cancelled.connect(lambda: finish(None))
+            self._live.add(bubble)
+            bubble.popup_at(pos)
+        return ask
 
-    def _settings_applied(self):
-        self._apply_autostart()
-        self._restart_hook()
+    def _ask_editor(self, factory):
+        def ask(cb):
+            editor = factory()
+            state = {"done": False}
 
-    def quit(self):
+            def finish(value):
+                if state["done"]:
+                    return
+                state["done"] = True
+                self._live.discard(editor)
+                cb(value)
+
+            editor.accepted.connect(finish)
+            editor.cancelled.connect(lambda: finish(None))
+            self._live.add(editor)
+            editor.start()
+        return ask
+
+    # -- jobs -----------------------------------------------------------------------------------
+    def _run_job(self, action, files, opts, pos, attempts: int) -> None:
+        from .ui.cards import JobCard
+        job = Job(action.id, files, dict(opts), journal=self.journal)
+        card = JobCard(action.label)
+        state = {"shown": False}
+
+        def show_card():
+            if not state["shown"] and not job.finished:
+                state["shown"] = True
+                self.cards.add(card)
+
+        def on_done(result):
+            job.finished = True
+            self._live.discard(job)
+            log(f"résultat {result.action_id} : "
+                + (f"ok, {len(result.outputs)} fichier(s) en {result.seconds:.1f} s"
+                   if result.ok else f"{'annulé' if result.cancelled else 'échec'} : "
+                                     f"{result.error}"))
+            if result.needs_password and attempts < 3:
+                if state["shown"]:
+                    card.close()
+                else:
+                    card.deleteLater()
+                self._drive(self._retry_password(action, files, opts, pos, attempts,
+                                                 result.error))
+                return
+            card.finish(result, note=_elsewhere_note(files, result.outputs))
+            if not state["shown"]:
+                state["shown"] = True
+                self.cards.add(card)
+            else:
+                self.cards.relayout()
+
+        job.progress.connect(card.set_progress)
+        job.done.connect(on_done)
+        card.cancel_requested.connect(job.cancel_event.set)
+        self._live.add(job)
+        job.start()
+        QTimer.singleShot(250, show_card)
+
+    def _retry_password(self, action, files, opts, pos, attempts, error):
+        pw = yield self._ask_text("Mot de passe du PDF", error, pos, password=True,
+                                  ok_label="Réessayer")
+        if pw is None:
+            return
+        opts = dict(opts)
+        opts["password"] = pw
+        self._run_job(action, files, opts, pos, attempts + 1)
+
+    # -- messages, help, settings ------------------------------------------------------------------
+    def message(self, title: str, text: str = "", kind: str = "info",
+                buttons=None, auto_ms: int = 8000) -> None:
+        from .ui.cards import MessageCard
+        self.cards.add(MessageCard(title, text, kind, buttons, auto_ms))
+
+    def show_help(self, already_running: bool) -> None:
+        from .win.hotkey import LABEL
+        title = "Cerclic est déjà lancé" if already_running else "Cerclic est prêt"
+        text = ("Clic droit sur une image, un PDF ou une vidéo, puis « Cerclic ». "
+                f"Ou sélectionne des fichiers et appuie sur {LABEL}.")
+        buttons = None
+        if os.name == "nt":
+            from .win import shell
+            if shell.is_windows_11() and not shell.classic_menu_enabled():
+                text += (" Sous Windows 11, l'entrée est dans « Afficher d'autres "
+                         "options » (ou Maj + clic droit).")
+                buttons = [("Plus tard", None), ("Cerclic en un clic", self.enable_classic_menu)]
+        self.message(title, text, buttons=buttons, auto_ms=14000)
+
+    def enable_classic_menu(self) -> None:
+        from .win import shell
         try:
-            self.hook.stop()
+            shell.set_classic_menu(True)
+            self.settings.set("classic_menu", True)
+            self.settings.set("classic_menu_by_cerclic", True)
+            self.settings.save()
         except Exception:
-            pass
+            log_exception("menu classique")
+            return
+        self.message("Menu complet activé",
+                     "Il s'applique au redémarrage de l'Explorateur. Les fenêtres de "
+                     "dossiers ouvertes vont se fermer.",
+                     buttons=[("Plus tard", None),
+                              ("Redémarrer l'Explorateur", self._restart_explorer)],
+                     auto_ms=20000)
+
+    def _restart_explorer(self) -> None:
+        from .win import shell
+        try:
+            shell.restart_explorer()
+        except Exception:
+            log_exception("redémarrage de l'Explorateur")
+
+    def open_settings(self) -> None:
+        if self._settings_win is not None:
+            try:
+                self._settings_win.show()
+                self._settings_win.raise_()
+                self._settings_win.activateWindow()
+                return
+            except RuntimeError:
+                self._settings_win = None
+        from .ui.settings_window import SettingsWindow
+        from .win.hotkey import LABEL
+        win11 = False
+        if os.name == "nt":
+            from .win import shell
+            win11 = shell.is_windows_11()
+        win = SettingsWindow(self.settings, windows_11=win11, hotkey_label=LABEL)
+        win.saved.connect(lambda: self._settings_saved(win))
+        win.draw_signature.connect(lambda: self._draw_signature(win))
+        win.destroyed.connect(lambda *_: setattr(self, "_settings_win", None))
+        self._settings_win = win
+        win.show()
+        win.raise_()
+        win.activateWindow()
+
+    def _draw_signature(self, win) -> None:
+        def flow():
+            from .ui.signature import SignaturePad
+            res = yield self._ask_editor(SignaturePad)
+            if res:
+                self.settings.set("signature", res["signature"])
+                self.settings.save()
+                try:
+                    win.refresh_signature()
+                except RuntimeError:
+                    pass
+        self._drive(flow())
+
+    def _settings_saved(self, win) -> None:
+        self.apply_integration()
+        choice = win.classic_choice()
+        if choice is not None and os.name == "nt":
+            from .win import shell
+            if choice != shell.classic_menu_enabled():
+                if choice:
+                    self.enable_classic_menu()
+                else:
+                    try:
+                        shell.set_classic_menu(False)
+                    except Exception:
+                        log_exception("menu classique")
+                    self.settings.set("classic_menu", False)
+                    self.settings.set("classic_menu_by_cerclic", False)
+                    self.settings.save()
+                    self.message("Menu de Windows 11 rétabli",
+                                 "Il s'applique au redémarrage de l'Explorateur.",
+                                 buttons=[("Plus tard", None),
+                                          ("Redémarrer l'Explorateur",
+                                           self._restart_explorer)], auto_ms=20000)
+
+    def quit(self) -> None:
+        log("arrêt de Cerclic")
+        if self.hotkey is not None:
+            self.hotkey.stop()
+        if self.session is not None:
+            self.session.close()
+        running = [j for j in self._live if isinstance(j, Job)]
+        for job in running:
+            job.cancel_event.set()
+        # Let stopped actions clean up what they started (a few seconds at most).
+        deadline = time.monotonic() + 6
+        while any(not j.finished for j in running) and time.monotonic() < deadline:
+            self.qapp.processEvents(QEventLoop.AllEvents, 50)
+            time.sleep(0.02)
+        self.cards.close_all()
         self.tray.hide()
-        self.app.quit()
+        self.qapp.quit()
 
 
-def _log_crash(exc: BaseException) -> str:
-    import traceback
-    from .settings import config_dir
-    path = os.path.join(config_dir(), "cerclic.log")
-    try:
-        with open(path, "a", encoding="utf-8") as f:
-            f.write("\n--- crash ---\n")
-            traceback.print_exc(file=f)
-    except Exception:
-        pass
-    return path
+# ----- startup ---------------------------------------------------------------------------------
+
+def _qt_messages(mode, context, message) -> None:
+    if "QWindowsWindow::setGeometry" in message or "propagateSizeHints" in message:
+        return
+    log(f"Qt: {message}")
 
 
-def main():
-    if hasattr(Qt, "AA_EnableHighDpiScaling"):
-        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-    app.setApplicationName(APP_NAME)
-    if not QSystemTrayIcon.isSystemTrayAvailable():
-        QMessageBox.critical(None, "Cerclic",
-                             "Barre des tâches indisponible.")
-        return 1
-    # Single instance: if Cerclic already runs, say so and stop.
-    from PySide6.QtNetwork import QLocalServer, QLocalSocket
-    probe = QLocalSocket()
-    probe.connectToServer("cerclic-instance")
-    if probe.waitForConnected(300):
-        QMessageBox.information(None, "Cerclic",
-                                "Cerclic est déjà lancé (icône près de l'horloge).")
-        return 0
-    server = QLocalServer()
-    QLocalServer.removeServer("cerclic-instance")
-    server.listen("cerclic-instance")
+def _install_crash_logging() -> None:
+    def hook(exc_type, exc, tb):
+        import traceback
+        log("erreur non gérée :\n" + "".join(traceback.format_exception(exc_type, exc, tb)))
+
+    def thread_hook(args):
+        hook(args.exc_type, args.exc_value, args.exc_traceback)
+
+    sys.excepthook = hook
+    threading.excepthook = thread_hook
+
+
+def run_resident(cmd: str, paths: list[str], lock) -> int:
+    """Start the resident Cerclic, then perform the request that started it."""
+    _install_crash_logging()
+    qInstallMessageHandler(_qt_messages)
+    qapp = QApplication.instance() or QApplication(sys.argv[:1])
+    qapp.setQuitOnLastWindowClosed(False)
+    qapp.setApplicationName(APP_NAME)
+    qapp.setApplicationVersion(__version__)
+    from .ui.theme import apply_app_theme
+    apply_app_theme(qapp)
     log(f"démarrage de Cerclic {__version__} (journal : {log_path()})")
+    if not QSystemTrayIcon.isSystemTrayAvailable():
+        log("zone de notification indisponible au démarrage, nouvel essai")
     try:
-        cerclic = CerclicApp(app)
-        _ = cerclic
-        return app.exec()
-    except Exception as exc:
-        path = _log_crash(exc)
-        QMessageBox.critical(None, "Cerclic, erreur au démarrage",
-                             f"{exc}\n\nDétails écrits dans :\n{path}")
+        app = CerclicApp(qapp)
+    except Exception:
+        log_exception("échec au démarrage")
         return 1
+    app._lock = lock  # held for the life of the process
 
+    def first_request():
+        if not app.settings.get("welcome_shown"):
+            app.settings.set("welcome_shown", True)
+            app.settings.save()
+            if cmd != "open":
+                app.show_help(False)
+        elif cmd == "hello":
+            app.show_help(False)
+        if cmd == "open":
+            app.open_wheel(paths, source="menu")
+        elif cmd == "settings":
+            app.open_settings()
 
-if __name__ == "__main__":
-    sys.exit(main())
+    QTimer.singleShot(0, first_request)
+    return qapp.exec()

@@ -7,17 +7,17 @@ import os
 APP_DIR_NAME = "Cerclic"
 
 DEFAULTS: dict = {
-    "signature": "",          # path to a transparent PNG signature
-    "autostart": True,        # launch with Windows
+    "signature": "",            # path to the signature PNG (drawn or imported)
+    "autostart": True,          # launch with Windows
+    "context_menu": True,       # "Cerclic" entry in the right-click menu
+    "hotkey": True,             # Ctrl+Alt+Space opens the wheel on the selection
+    "classic_menu": False,      # Windows 11: show the full right-click menu at once
+    "classic_menu_by_cerclic": False,  # we set it, so we may undo it on uninstall
     "jpg_quality": 90,
     "compress_quality": 70,
-    "resize_max_side": 1600,
-    "gesture": "left_hold",    # left_hold | right_hold | double_right
-    "double_ms": 350,          # window for the second right-click
-    "hold_ms": 350,            # press-and-hold duration to open the wheel
-    "ring_theme": "dark",
-    "primary_only": False,     # show only primary actions on the first ring
+    "welcome_shown": False,
 }
+# Keys from older versions (gesture, hold_ms...) are dropped on load.
 
 
 def config_dir() -> str:
@@ -38,22 +38,31 @@ class Settings:
     def __init__(self, data: dict | None = None):
         self._data = dict(DEFAULTS)
         if data:
-            self._data.update(data)
+            for k, v in data.items():
+                if k in DEFAULTS and isinstance(v, type(DEFAULTS[k])):
+                    self._data[k] = v
 
     @classmethod
     def load(cls) -> "Settings":
         try:
             with open(config_path(), "r", encoding="utf-8") as f:
-                return cls(json.load(f))
+                data = json.load(f)
+            return cls(data if isinstance(data, dict) else None)
         except Exception:
             return cls()
 
     def save(self) -> None:
+        path = config_path()
+        tmp = path + ".tmp"
         try:
-            with open(config_path(), "w", encoding="utf-8") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, path)
         except Exception:
-            pass
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
     def get(self, key: str, default=None):
         return self._data.get(key, DEFAULTS.get(key, default))

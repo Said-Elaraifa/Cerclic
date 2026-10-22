@@ -1,8 +1,10 @@
-# Cerclic runtime dependencies (Windows).
-PySide6-Essentials>=6.8
-Pillow>=10.4
-pillow-heif>=0.18
-pymupdf>=1.26.7
-pikepdf>=9
-pdf2docx>=0.5.13          # pulls numpy, opencv-python-headless, python-docx, fonttools, fire
-pywin32>=306; platform_system == "Windows"
+# Cerclic runtime dependencies. Versions are pinned so every build is identical.
+PySide6-Essentials==6.8.3
+Pillow==12.3.0
+pillow-heif==1.8.1
+pymupdf==1.28.2
+pikepdf==10.17.0
+pdf2docx==0.5.13          # PDF to Word; pulls numpy, opencv, python-docx, fonttools
+opencv-python-headless==4.14.0.94
+numpy==2.1.3              # newer builds cannot load under Wine, which builds the .exe
+pywin32==311; platform_system == "Windows"

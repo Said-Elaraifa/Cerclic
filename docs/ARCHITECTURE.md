@@ -3,56 +3,89 @@
 ## Vue d'ensemble
 
 ```
-run_cerclic.py            point d'entrée de l'exécutable
+run_cerclic.py            point d'entrée de Cerclic.exe (et de pythonw)
+native/cerclic_open.c     CerclicOpen.exe, le petit programme du clic droit (C, 50 ko)
 cerclic/
-  app.py                  tray + orchestration (geste -> sélection -> roue -> action -> toast)
-  engine.py               lance une action, renvoie un résultat, ne lève jamais
-  settings.py             config JSON dans %APPDATA%\Cerclic
-  paths.py                noms de sortie non destructifs (jamais d'écrasement)
-  actions/                fonctions pures de traitement (testées partout)
-    images.py  pdf.py  video.py  registry.py
-  win/                    code Windows uniquement (ctypes / pywin32)
-    mouse_hook.py         détection du double clic droit, sans flash
-    selection.py         fichiers sélectionnés (Explorateur via COM, Bureau)
-    autostart.py          démarrage avec Windows (clé de registre Run)
+  launcher.py             instance unique, transmission des demandes (bibliothèque standard seule)
+  app.py                  l'instance résidente : icône, serveur de demandes, roue, éditeurs, tâches
+  engine.py               lance une action, renvoie un résultat, ne lève jamais d'exception
+  errors.py               erreurs prévues (mot de passe, rien à faire, annulation)
+  paths.py                noms de sortie réservés atomiquement, jamais d'écrasement
+  settings.py  log.py     réglages JSON et journal dans %APPDATA%\Cerclic
+  actions/                traitements purs, testés partout
+    images.py  pdf.py  video.py  registry.py  common.py
+  win/                    Windows uniquement
+    shell.py              entrée du clic droit, démarrage avec Windows, menu complet de Windows 11
+    hotkey.py             raccourci Ctrl+Alt+Espace (RegisterHotKey)
+    selection.py          fichiers sélectionnés dans la fenêtre au premier plan (Shell.Application)
+    foreground.py         mise au premier plan
   ui/                     PySide6
-    radial.py             la roue, navigation catégories -> actions
-    crop.py               fenêtre de rognage interactive
-    toast.py  dialogs.py  settings_window.py  icons.py  trayicon.py
+    radial.py             la roue (catégories, actions, « Plus », variantes)
+    dismiss.py            fermeture de la roue et des bulles quand on va ailleurs
+    bubble.py             saisie d'un mot de passe ou d'un texte à la place de la roue
+    crop_editor.py        rognage plein écran (image et PDF)
+    signature.py          dessin de la signature et placement sur la page
+    cards.py              progression puis résultat, en bas à droite
+    settings_window.py  theme.py  icons.py  trayicon.py  editor_base.py
+installer/cerclic.iss     installateur Inno Setup (par utilisateur, sans droits administrateur)
 ```
+
+## Comment la roue s'ouvre
+
+1. **Clic droit, « Cerclic »**. L'entrée est déclarée par utilisateur sous
+   `HKCU\Software\Classes\SystemFileAssociations\<ext>\shell\Cerclic` pour
+   chaque type pris en charge. L'Explorateur lance `CerclicOpen.exe "<fichier>"`,
+   une fois par fichier sélectionné (`MultiSelectModel=Player`, jusqu'à 100).
+   Chaque copie envoie son chemin à l'instance résidente par le canal nommé
+   `\\.\pipe\Cerclic-<session>`, autorise Cerclic à passer au premier plan
+   (`AllowSetForegroundWindow`) et se termine en quelques millisecondes. Les
+   chemins qui arrivent dans la même seconde rejoignent la roue déjà ouverte.
+   Si Cerclic ne tourne pas, une seule copie le démarre (mutex
+   `Local\Cerclic.Launch`), toutes attendent puis transmettent.
+2. **Ctrl+Alt+Espace**. `RegisterHotKey` : Windows ne prévient Cerclic que pour
+   cette combinaison. Cerclic lit alors la sélection de la fenêtre de
+   l'Explorateur au premier plan (onglets de Windows 11 compris) ou du Bureau.
+3. **Fichiers glissés sur l'icône**, ou `Cerclic.exe --open <fichiers>` :
+   même transmission, faite en Python par `launcher.py`.
+
+Cerclic n'écoute ni la souris ni le clavier en dehors de cela. La roue se
+ferme quand on clique ailleurs (perte du premier plan), sur Échap, ou si le
+pointeur s'éloigne alors que Windows a refusé de la mettre au premier plan.
+
+Instance unique : un mutex `Local\Cerclic.Resident` par session ; deux comptes
+Windows ouverts en même temps ont chacun leur Cerclic.
 
 ## Principes
 
 - **Rien n'écrase l'original.** Toute sortie est un nouveau fichier voisin,
-  nommé par `paths.output_for`. L'« Annuler » du toast supprime seulement ce que
-  Cerclic vient de créer.
+  réservé atomiquement (création exclusive) : deux actions simultanées ne
+  peuvent pas prendre le même nom. Si une action échoue ou est arrêtée, tout
+  ce qu'elle avait réservé est supprimé.
 - **Le moteur ne dépend pas de l'interface.** `actions/` et `engine.py` se
-  testent sur n'importe quel système (Linux inclus) ; 18 tests couvrent chaque
-  action sur de vrais fichiers.
-- **Une action = métadonnées + fonction.** `registry.ACTIONS` décrit chaque
-  action (libellé, catégorie, familles de fichiers, besoins). La roue et le
-  moteur lisent le même registre, donc ajouter une action tient en une entrée.
+  testent sur n'importe quel système ; les éditeurs travaillent en unités de
+  la source (pixels de l'image redressée, points de la page PDF visible).
+- **Une action = métadonnées + fonction** (`registry.ACTIONS`) : libellé,
+  catégorie, ce qu'il faut demander (`needs`), variantes (`choices`).
+- **PDF tournés ou recadrés** : les coordonnées « vues par le lecteur » sont
+  converties pour PyMuPDF ; filigrane et numéros sont posés via une page
+  intermédiaire. Des tests vérifient le rendu sur des pages tournées de
+  0 à 270° avec une zone de recadrage décalée.
 
-## Ce qui ne peut se tester que sous Windows
+## Tests
 
-Ces parties compilent et sont écrites avec soin, mais ne tournent pas en cloud
-Linux. À vérifier en premier au test :
+`pytest` : chaque action sur de vrais fichiers (EXIF, HEIC, GIF animés, PDF
+protégés, vidéos aux dimensions impaires, annulation...), la roue, les
+bulles, les éditeurs et le parcours complet demande, roue, action, carte,
+hors écran ; le protocole de transmission. Le build Windows est en plus essayé
+sous Wine : roue, rognage, signature, fusion, filigrane, installation.
 
-1. Le geste : double clic droit ouvre la roue ; un clic droit simple garde le
-   menu Windows (avec le petit délai réglable).
-2. La lecture de la sélection dans une fenêtre de l'Explorateur, puis sur le
-   Bureau.
-3. L'icône dans la barre des tâches et le démarrage avec Windows.
+## Construire
 
-Tout le traitement d'images, PDF et vidéo derrière ces gestes est déjà validé
-par les tests.
+Sur Windows (ou GitHub Actions) : `pip install -r requirements-dev.txt`,
+compiler `native/cerclic_open.c` avec mingw-w64, copier `ffmpeg.exe` dans
+`assets/ffmpeg/`, `pyinstaller cerclic.spec`, copier `CerclicOpen.exe` dans
+`dist/Cerclic/`, puis `ISCC installer/cerclic.iss`. Depuis Linux :
+`scripts/build_windows.sh` (Wine, mingw-w64).
 
-## Ajouter une action
-
-1. Écrire la fonction pure dans `actions/images.py`, `pdf.py` ou `video.py`.
-2. Ajouter une `Action(...)` dans `actions/registry.py` (libellé, catégorie,
-   `applies`, `handler`, et `needs`/`combine`/`primary` au besoin).
-3. Ajouter un cas de test dans `tests/test_actions.py`.
-
-La roue, le routage de la sélection et le moteur la prennent en compte sans
-autre changement.
+Après un changement de la liste des extensions prises en charge :
+`python scripts/gen_installer_registry.py` (un test le vérifie).
