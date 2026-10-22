@@ -8,6 +8,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QImage
 
 from cerclic.actions import registry
+from conftest import HAS_FFMPEG
 
 
 @pytest.fixture(autouse=True)
@@ -43,17 +44,47 @@ def _click_slice(qtbot, w, label):
 def test_wheel_single_category_shows_actions(qtbot, jpg_photo):
     w = _wheel(qtbot, [jpg_photo])
     labels = [s.label for s in w._slices]
-    assert labels[:2] == ["Rogner", "Convertir"]
-    assert "Plus" not in labels
+    assert labels == ["Rogner", "Pivoter", "Redimensionner", "Compresser", "Convertir",
+                      "Copier", "En PDF", "Anonymiser"]
+    assert all(s.desc for s in w._slices)              # every action says what it does
+
+
+def test_wheel_slices_are_where_they_are_drawn(qtbot, jpg_photo):
+    w = _wheel(qtbot, [jpg_photo])
+    for i in range(len(w._slices)):
+        assert w.index_at(w.slice_center(i)) == i
+    top = w._c() + QPoint(0, -100)                      # first slice is at the top
+    assert w.index_at(top) == 0
 
 
 def test_wheel_choice_flow(qtbot, jpg_photo):
     w = _wheel(qtbot, [jpg_photo])
     with qtbot.waitSignal(w.chosen, timeout=2000) as sig:
         _click_slice(qtbot, w, "Pivoter")
-        assert [s.label for s in w._slices] == ["Droite", "Gauche", "180°"]
+        assert [s.label for s in w._slices] == ["Droite", "Gauche", "180°", "Miroir"]
         _click_slice(qtbot, w, "Gauche")
     assert sig.args == ["img_rotate", {"degrees": 270}]
+
+
+def test_wheel_menus_per_family(qtbot, jpg_photo, pdf_3p, pdf_2p, small_video, tmp_path):
+    from cerclic.actions.registry import menu_for
+    two_images = [jpg_photo, str(tmp_path / "b.png")]
+    Image.new("RGB", (40, 30)).save(two_images[1])
+    labels = lambda paths, cat: [a.label for a in menu_for(paths)[cat]]
+    assert "Assembler" in labels(two_images, "image")
+    assert "Rogner" not in labels(two_images, "image") and "Copier" not in labels(two_images, "image")
+    assert "Fusionner" in labels([pdf_3p, pdf_2p], "pdf")
+    assert "Pages" in labels([pdf_3p], "pdf") and "Signer" in labels([pdf_3p], "pdf")
+    assert labels([small_video], "video")[0] == "Raccourcir"
+    song = tmp_path / "note.m4a"
+    song.write_bytes(b"x")
+    assert labels([str(song)], "audio") == ["Raccourcir", "En MP3", "Compresser"]
+
+
+def test_wheel_shows_a_preview_of_the_file(qtbot, jpg_photo):
+    w = _wheel(qtbot, [jpg_photo])
+    w._load_preview(jpg_photo)
+    qtbot.waitUntil(lambda: w._thumb is not None, timeout=5000)
 
 
 def test_wheel_categories_more_and_back(qtbot, jpg_photo, pdf_3p):
@@ -136,10 +167,10 @@ def test_bubble_accept_and_cancel(qtbot):
 # ---- crop canvas & editor ------------------------------------------------------------------
 
 def _canvas(qtbot, full=(1000, 500)):
-    from cerclic.ui.crop_editor import CropCanvas
+    from cerclic.ui.crop_editor import MARGIN, CropCanvas
     c = CropCanvas()
     qtbot.addWidget(c)
-    c.resize(1072, 572)              # 1000x500 view at scale 1 with 36 px margins
+    c.resize(1000 + 2 * MARGIN, 500 + 2 * MARGIN)    # 1000x500 view at scale 1
     img = QImage(100, 50, QImage.Format_RGB32)
     img.fill(0xFF336699)
     c.set_image(img, full)
@@ -321,18 +352,75 @@ def test_job_card_states(qtbot, tmp_path):
     stack.close_all()
 
 
-def test_settings_window_saves(qtbot):
+def test_settings_window_applies_at_once(qtbot):
     from cerclic.settings import Settings
     from cerclic.ui.settings_window import SettingsWindow
     s = Settings()
     w = SettingsWindow(s)
     qtbot.addWidget(w)
-    w.hotkey.setChecked(False)
+    seen = []
+    w.changed.connect(seen.append)
+    w.hotkey_on.setChecked(False)
     w.compress_q.setValue(55)
-    with qtbot.waitSignal(w.saved, timeout=2000):
-        w._save()
     again = Settings.load()
     assert again.get("hotkey") is False and again.get("compress_quality") == 55
+    assert "hotkey" in seen and "compress_quality" in seen
+    assert not w.shortcut.isEnabled()
+
+
+def test_shortcut_recorder(qtbot):
+    from cerclic.settings import Settings
+    from cerclic.ui.settings_window import SettingsWindow
+    from cerclic.win import hotkey as hk
+    s = Settings()
+    w = SettingsWindow(s)
+    qtbot.addWidget(w)
+    w.show()
+    pauses = []
+    w.capturing.connect(pauses.append)
+    sc = w.shortcut
+    sc.start_recording()
+    assert pauses == [True]
+    qtbot.keyClick(sc, Qt.Key_C, Qt.ControlModifier)         # refused: copy
+    assert sc.recording and "copier" in sc.status.text()
+    with qtbot.waitSignal(w.changed, timeout=2000) as sig:
+        qtbot.keyClick(sc, Qt.Key_X, Qt.ControlModifier | Qt.ShiftModifier)
+    assert sig.args == ["hotkey_combo"]
+    assert not sc.recording and pauses == [True, False]
+    again = Settings.load()
+    assert (again.get("hotkey_mods"), again.get("hotkey_vk")) == \
+        (hk.MOD_CONTROL | hk.MOD_SHIFT, 0x58)
+    sc.start_recording()
+    qtbot.keyClick(sc, Qt.Key_Escape)                         # cancel: unchanged
+    assert not sc.recording and Settings.load().get("hotkey_vk") == 0x58
+    sc._default()
+    assert Settings.load().get("hotkey_vk") == hk.DEFAULT_VK
+
+
+def test_hotkey_rules():
+    from cerclic.win import hotkey as hk
+    assert hk.label(hk.DEFAULT_MODS, hk.DEFAULT_VK) == "Ctrl + Alt + Espace"
+    assert hk.check(hk.DEFAULT_MODS, hk.DEFAULT_VK) is None
+    assert hk.check(hk.MOD_CONTROL | hk.MOD_SHIFT, 0x58) is None      # Ctrl+Maj+X
+    assert hk.check(0, 0x77) is None                                  # F8
+    assert hk.check(hk.MOD_WIN | hk.MOD_SHIFT, 0x43) is None
+    assert hk.check(0, 0x41)                                          # a plain letter
+    assert hk.check(hk.MOD_SHIFT, 0x41)                               # a capital letter
+    assert hk.check(hk.MOD_CONTROL, 0x56)                             # paste
+    assert hk.check(hk.MOD_CONTROL | hk.MOD_ALT, 0x30)                # AltGr+0 = @
+    assert hk.check(hk.MOD_CONTROL | hk.MOD_ALT, 0x45)                # AltGr+E = €
+    assert hk.check(hk.MOD_ALT, 0x73)                                 # Alt+F4
+    assert hk.check(0, 0x74)                                          # F5
+    assert hk.check(hk.MOD_CONTROL, 0)                                # no key yet
+
+
+def test_hello_opens_cerclic_window(qtbot, cerclic_app):
+    cerclic_app.handle_request("hello", [])
+    win = cerclic_app._settings_window()
+    assert win is not None and win.isVisible()
+    cerclic_app.handle_request("hello", [])                   # the same window again
+    assert cerclic_app._settings_window() is win
+    win.close()
 
 
 # ---- the whole flow -----------------------------------------------------------------------------------
@@ -534,3 +622,161 @@ def test_result_card_stays_on_screen(qtbot, tmp_path):
         bottom = b.mapTo(card, b.rect().bottomLeft()).y()
         assert bottom <= card.height() - 16
     card.close()
+
+
+# ---- 0.3: popups -------------------------------------------------------------------------------
+
+def test_popups_open_small_where_the_wheel_was(qtbot, jpg_photo, pdf_3p):
+    from PySide6.QtGui import QGuiApplication
+    from cerclic.ui.crop_editor import CropEditor
+    from cerclic.ui.editor_base import EDGE, SHADOW
+    avail = QGuiApplication.primaryScreen().availableGeometry()
+    for path in (jpg_photo, pdf_3p):
+        for anchor in (QPoint(avail.center()), QPoint(avail.right() - 5, avail.bottom() - 5),
+                       QPoint(avail.left() + 3, avail.top() + 3)):
+            ed = CropEditor(path)
+            ed.start(anchor)
+            card = ed.geometry().adjusted(SHADOW, SHADOW, -SHADOW, -SHADOW)
+            assert avail.adjusted(EDGE - 1, EDGE - 1, 1 - EDGE, 1 - EDGE).contains(card), \
+                (path, anchor, card)
+            assert card.width() < avail.width() * 0.75
+            ed.close()
+    ed = CropEditor(jpg_photo)
+    ed.start(QPoint(avail.center()))
+    assert ed.geometry().center().x() == pytest.approx(avail.center().x(), abs=2)
+    ed.close()
+
+
+def test_editor_closed_while_loading_is_safe(qtbot, tmp_path):
+    from cerclic.ui.crop_editor import CropEditor
+    big = tmp_path / "big.png"
+    Image.new("RGB", (5000, 4000), (40, 90, 160)).save(big)
+    for _ in range(3):
+        ed = CropEditor(str(big))
+        ed.start(QPoint(300, 300))
+        ed.close()
+    qtbot.wait(1500)                                     # the loads finish meanwhile
+
+
+def test_pages_editor(qtbot, pdf_3p):
+    from cerclic.ui.pages_editor import PagesEditor
+    ed = PagesEditor(pdf_3p)
+    ed.start(QPoint(400, 400))
+    assert ed.grid.count() == 3
+    qtbot.waitUntil(lambda: len(ed._thumbs) == 3, timeout=5000)
+    ed.grid.item(2).setSelected(True)
+    ed.move_selection(-1)
+    ed.move_selection(-1)                                  # page 3 is now first
+    ed.rotate_selection(90)
+    assert ed.grid.order() == [(2, 90), (0, 0), (1, 0)]
+    ed.grid.clearSelection()
+    ed.grid.item(2).setSelected(True)
+    qtbot.keyClick(ed, Qt.Key_Delete)                      # remove page 2
+    assert ed.grid.order() == [(2, 90), (0, 0)]
+    with qtbot.waitSignal(ed.accepted, timeout=2000) as sig:
+        qtbot.keyClick(ed, Qt.Key_Return)
+    assert sig.args[0] == {"pages_order": [(2, 90), (0, 0)], "pages_mode": "save"}
+
+
+def test_pages_editor_extract(qtbot, pdf_3p):
+    from cerclic.ui.pages_editor import PagesEditor
+    ed = PagesEditor(pdf_3p)
+    ed.start(QPoint(400, 400))
+    assert not ed.extract_btn.isEnabled()
+    ed.grid.item(0).setSelected(True)
+    ed.grid.item(2).setSelected(True)
+    with qtbot.waitSignal(ed.accepted, timeout=2000) as sig:
+        ed.extract_btn.click()
+    assert sig.args[0] == {"pages_order": [(0, 0), (2, 0)], "pages_mode": "extract"}
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg missing")
+def test_trim_editor_video(qtbot, long_clip):
+    from cerclic.ui.trim_editor import TrimEditor, fmt_time
+    ed = TrimEditor(long_clip)
+    ed.start(QPoint(400, 400))
+    qtbot.waitUntil(lambda: ed.track.duration > 3.5, timeout=10000)
+    qtbot.waitUntil(lambda: ed.frame.image is not None, timeout=10000)
+    t = ed.track
+    t.set_range(1.0, 3.0, "start")
+    t.setFocus()
+    qtbot.keyClick(t, Qt.Key_Right, Qt.ShiftModifier)     # start + 1 s
+    assert t.start == pytest.approx(2.0)
+    qtbot.keyClick(t, Qt.Key_Tab)                          # now the end handle
+    qtbot.keyClick(t, Qt.Key_Left)                         # end - 0.1 s
+    assert t.end == pytest.approx(2.9)
+    assert "Durée 0:00,9" == ed.length_label.text()
+    with qtbot.waitSignal(ed.accepted, timeout=2000) as sig:
+        ed.validate()
+    assert sig.args[0] == {"trim_start": 2.0, "trim_end": 2.9}
+    assert fmt_time(3725.26) == "1:02:05,3"
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg missing")
+def test_trim_editor_sound_and_handles(qtbot, m4a_sound):
+    from cerclic.ui.trim_editor import TrimEditor
+    ed = TrimEditor(m4a_sound)
+    ed.start(QPoint(400, 400))
+    assert ed.frame is None
+    qtbot.waitUntil(lambda: ed.track.duration > 2.5, timeout=10000)
+    qtbot.waitUntil(lambda: ed.track.wave is not None, timeout=10000)
+    t = ed.track
+    x_end = int(t.x_of(t.end))
+    y = t.height() // 2
+    qtbot.mousePress(t, Qt.LeftButton, pos=QPoint(x_end, y))
+    qtbot.mouseMove(t, QPoint(int(t.x_of(1.5)), y))
+    qtbot.mouseRelease(t, Qt.LeftButton, pos=QPoint(int(t.x_of(1.5)), y))
+    assert t.end == pytest.approx(1.5, abs=0.05)
+    t.set_range(1.4, 1.45, "end")                          # never shorter than 0.2 s
+    assert t.end - t.start == pytest.approx(0.2)
+
+
+def test_copy_image_to_clipboard(qtbot, cerclic_app, jpg_photo):
+    from PySide6.QtWidgets import QApplication
+    QApplication.clipboard().clear()
+    cerclic_app.start_action("img_copy", [jpg_photo], {}, QPoint(300, 300))
+    qtbot.waitUntil(lambda: not QApplication.clipboard().image().isNull(), timeout=5000)
+    assert QApplication.clipboard().image().width() > 10
+
+
+def test_pages_flow_end_to_end(qtbot, cerclic_app, pdf_3p):
+    from cerclic.ui.pages_editor import PagesEditor
+    cerclic_app.handle_request("open", [pdf_3p])
+    _click_slice(qtbot, cerclic_app.session.wheel, "Pages")
+    qtbot.waitUntil(lambda: any(isinstance(w, PagesEditor) for w in cerclic_app._live),
+                    timeout=3000)
+    ed = next(w for w in cerclic_app._live if isinstance(w, PagesEditor))
+    ed.grid.item(0).setSelected(True)
+    ed.remove_selection()
+    ed.validate()
+    folder = os.path.dirname(pdf_3p)
+    qtbot.waitUntil(lambda: any("organized" in f for f in os.listdir(folder)), timeout=8000)
+
+
+def test_used_editor_survives_a_click_elsewhere(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+    from cerclic.ui import dismiss
+
+    class Inactive:
+        @staticmethod
+        def applicationState():
+            return Qt.ApplicationInactive
+    monkeypatch.setattr(dismiss, "QGuiApplication", Inactive)
+    w = QWidget()
+    lay = QVBoxLayout(w)
+    button = QPushButton("x")
+    lay.addWidget(button)
+    w.show()
+    hits = []
+    fresh = dismiss.DismissGuard(w, lambda: hits.append("fresh"), keep_once_used=True)
+    fresh.start()
+    fresh._shown -= 10                               # past the first moment
+    fresh._check_deactivated()                       # opened by mistake: it goes
+    assert hits == ["fresh"]
+    used = dismiss.DismissGuard(w, lambda: hits.append("used"), keep_once_used=True)
+    used.start()
+    used._shown -= 10
+    qtbot.mouseClick(button, Qt.LeftButton)          # the user worked in it
+    used._check_deactivated()
+    assert hits == ["fresh"]
+    w.close()

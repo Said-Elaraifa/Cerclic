@@ -706,3 +706,206 @@ def test_only_true_srgb_images_are_reencoded_by_cerclic(tmp_path):
         imgs = d[0].get_images(full=True)
         verdict = sorted((i[2], _plain_image(d, i)) for i in imgs)
     assert verdict == [(60, True), (600, False), (600, True)]
+
+
+# ---- 0.3: new image tools ----------------------------------------------------------------
+
+def _jpeg_with_private_info(path, appended=b""):
+    import io
+    from PIL import ImageCms
+    im = Image.new("RGB", (300, 200), (200, 50, 50))
+    for x in range(120):
+        im.putpixel((x, 10), (0, 0, 255))
+    ex = Image.Exif()
+    ex[0x0112] = 6
+    ex[0x010F] = "PhoneMaker"
+    ex[0x0110] = "SuperPhone 15"
+    ex[0x8825] = {1: "N", 2: (48.0, 51.0, 30.0), 3: "E", 4: (2.0, 17.0, 40.0)}
+    icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", exif=ex.tobytes(), icc_profile=icc, quality=90,
+            comment=b"secret comment")
+    path.write_bytes(buf.getvalue() + appended)
+    return str(path)
+
+
+def test_anonymise_jpeg_keeps_picture_and_orientation(tmp_path):
+    src = _jpeg_with_private_info(tmp_path / "photo.jpg",
+                                  appended=b"\xff\xd8 second picture with GPS")
+    out = _ok(engine.run("img_clean", [src], {}))[0]
+    raw = open(out, "rb").read()
+    assert b"PhoneMaker" not in raw and b"second picture" not in raw and b"secret" not in raw
+    with Image.open(out) as o, Image.open(src) as a:
+        assert dict(o.getexif()) == {0x0112: 6}           # still shown upright
+        assert not o.getexif().get_ifd(0x8825)             # no GPS
+        assert o.info.get("icc_profile")                   # colours kept
+        assert o.tobytes() == a.tobytes()                  # not re-encoded
+    again = engine.run("img_clean", [out], {})
+    assert again.info                                      # nothing left to remove
+
+
+def test_anonymise_png_and_webp(tmp_path):
+    from PIL import PngImagePlugin
+    meta = PngImagePlugin.PngInfo()
+    meta.add_text("Author", "Said")
+    meta.add_text("GPS", "48.85,2.29")
+    png = tmp_path / "shot.png"
+    Image.new("RGBA", (50, 40), (10, 200, 30, 128)).save(png, pnginfo=meta)
+    out = _ok(engine.run("img_clean", [str(png)], {}))[0]
+    with Image.open(out) as o:
+        assert "Author" not in o.info and "GPS" not in o.info
+        assert o.mode == "RGBA" and o.getpixel((5, 5)) == (10, 200, 30, 128)
+    ex = Image.Exif()
+    ex[0x010F] = "PhoneMaker"
+    webp = tmp_path / "pic.webp"
+    Image.new("RGB", (50, 40), (1, 2, 3)).save(webp, exif=ex.tobytes())
+    out = _ok(engine.run("img_clean", [str(webp)], {}))[0]
+    assert b"PhoneMaker" not in open(out, "rb").read()
+    with Image.open(out) as o:
+        o.load()
+        assert o.size == (50, 40)
+
+
+def test_mirror(jpg_photo):
+    out = _ok(engine.run("img_rotate", [jpg_photo], {"mirror": True}))[0]
+    assert "mirrored" in out
+    with Image.open(jpg_photo) as a, Image.open(out) as b:
+        assert a.size == b.size
+
+
+def test_assemble_layouts(tmp_path):
+    a = tmp_path / "a.jpg"
+    b = tmp_path / "b.jpg"
+    c = tmp_path / "c.png"
+    Image.new("RGB", (400, 300), (255, 0, 0)).save(a)
+    Image.new("RGB", (300, 600), (0, 255, 0)).save(b)
+    Image.new("RGBA", (200, 200), (0, 0, 255, 100)).save(c)
+    row = _ok(engine.run("img_assemble", [str(a), str(b)], {"layout": "row"}))[0]
+    with Image.open(row) as im:
+        assert im.height == 450 and im.width == 600 + 225     # median height
+        assert row.endswith(".jpg")
+    col = _ok(engine.run("img_assemble", [str(a), str(b)], {"layout": "column"}))[0]
+    with Image.open(col) as im:
+        assert im.width == 350
+    grid = _ok(engine.run("img_assemble", [str(a), str(b), str(c)], {"layout": "grid"}))[0]
+    assert grid.endswith(".png")                               # transparency kept
+    with Image.open(grid) as im:
+        assert im.mode == "RGBA" and im.width > im.height / 2
+
+
+def test_clipboard_image_is_upright(jpg_rotated_exif):
+    from cerclic.actions.images import clipboard_image
+    im = clipboard_image(jpg_rotated_exif)
+    assert im.size == (200, 400)
+
+
+# ---- 0.3: new PDF tools -------------------------------------------------------------------
+
+def test_arrange_pdf_order_rotation_removal(pdf_3p):
+    out = _ok(engine.run("pdf_pages", [pdf_3p],
+                         {"pages_order": [(2, 0), (0, 90)], "pages_mode": "save"}))[0]
+    assert "organized" in out
+    with pymupdf.open(out) as d:
+        assert d.page_count == 2
+        assert "Page 3" in d[0].get_text() and "Page 1" in d[1].get_text()
+        assert d[1].rotation == 90
+    ext = _ok(engine.run("pdf_pages", [pdf_3p],
+                         {"pages_order": [(1, 0)], "pages_mode": "extract"}))[0]
+    assert "extract" in ext
+    with pymupdf.open(ext) as d:
+        assert d.page_count == 1 and "Page 2" in d[0].get_text()
+    same = engine.run("pdf_pages", [pdf_3p], {"pages_order": [0, 1, 2]})
+    assert same.info
+
+
+def test_pdf_pages_keeps_password(pdf_locked):
+    out = _ok(engine.run("pdf_pages", [pdf_locked],
+                         {"pages_order": [(1, 0), (0, 0)], "password": "secret"}))[0]
+    with pymupdf.open(out) as d:
+        assert d.needs_pass
+
+
+def test_pdf_to_text(pdf_3p, tmp_path):
+    out = _ok(engine.run("pdf_text", [pdf_3p], {}))[0]
+    raw = open(out, "rb").read()
+    assert raw.startswith(b"\xef\xbb\xbf")                  # Notepad reads the accents
+    text = raw.decode("utf-8-sig")
+    assert "Page 1" in text and "Page 3" in text and "\r\n" in text
+    scan = tmp_path / "scan.pdf"
+    with pymupdf.open() as d:
+        page = d.new_page()
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 50, 50), False)
+        page.insert_image(page.rect, pixmap=pix)
+        d.save(str(scan))
+    res = engine.run("pdf_text", [str(scan)], {})
+    assert res.info and "scan" in res.error
+
+
+# ---- 0.3: video and sound tools -----------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg missing")
+def test_trim_video(long_clip):
+    from cerclic.actions.video import probe
+    out = _ok(engine.run("vid_trim", [long_clip], {"trim_start": 1.0, "trim_end": 2.5}))[0]
+    assert out.endswith(".mp4")
+    assert abs(probe(out).duration - 1.5) < 0.2
+    whole = engine.run("vid_trim", [long_clip], {"trim_start": 0, "trim_end": 4.0})
+    assert whole.info
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg missing")
+def test_trim_sound_keeps_its_format(m4a_sound, wav_sound, opus_sound, mp3_sound):
+    from cerclic.actions.video import probe
+    for src, ext in ((m4a_sound, ".m4a"), (wav_sound, ".wav"), (opus_sound, ".opus"),
+                     (mp3_sound, ".mp3")):
+        out = _ok(engine.run("aud_trim", [src], {"trim_start": 0.5, "trim_end": 2.0}))[0]
+        assert out.endswith(ext), out
+        assert abs(probe(out).duration - 1.5) < 0.25, out
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg missing")
+def test_mute_and_rotate_video(small_video, silent_video):
+    from cerclic.actions.video import probe
+    out = _ok(engine.run("vid_mute", [small_video], {}))[0]
+    info = probe(out)
+    assert info.has_video and not info.has_audio
+    assert engine.run("vid_mute", [silent_video], {}).info
+    rot = _ok(engine.run("vid_rotate", [small_video], {"degrees": 90}))[0]
+    info = probe(rot)
+    assert (info.width, info.height) == (480, 640)
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg missing")
+def test_sound_to_mp3_and_compress(m4a_sound, mp3_sound, opus_sound):
+    out = _ok(engine.run("aud_mp3", [opus_sound], {}))[0]
+    assert out.endswith(".mp3") and os.path.getsize(out) > 1000
+    assert engine.run("aud_mp3", [mp3_sound], {}).info
+    small = _ok(engine.run("aud_compress", [mp3_sound], {}))[0]
+    assert os.path.getsize(small) < os.path.getsize(mp3_sound)
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg missing")
+def test_previews_for_the_cutting_popup(small_video, m4a_sound):
+    from cerclic.actions import video
+    import io
+    frame = video.frame_png(small_video, 0.5, 160, 120)
+    with Image.open(io.BytesIO(frame)) as im:
+        assert im.size == (160, 120)
+    wave = video.waveform_png(m4a_sound, 300, 60)
+    with Image.open(io.BytesIO(wave)) as im:
+        assert im.size == (300, 60)
+
+
+def test_probe_reads_phone_rotation(monkeypatch):
+    from cerclic.actions import video
+
+    class P:
+        returncode = 1
+        stderr = (b"  Duration: 00:00:05.00, start: 0.000000, bitrate: 100 kb/s\n"
+                  b"  Stream #0:0[0x1](und): Video: h264 (High), yuv420p, 1920x1080, "
+                  b"30 fps\n      Side data:\n        displaymatrix: rotation of -90.00 "
+                  b"degrees\n  Stream #0:1: Audio: aac, 44100 Hz\n")
+    monkeypatch.setattr(video.subprocess, "run", lambda *a, **k: P())
+    monkeypatch.setattr(video, "ffmpeg_path", lambda: "ffmpeg")
+    info = video.probe("x.mp4")
+    assert (info.width, info.height) == (1080, 1920) and info.has_audio

@@ -1,9 +1,10 @@
-"""Crop editor for images and PDFs.
+"""Crop editor for images and PDFs, in a compact popup where the wheel was.
 
-The window opens instantly; the picture (or PDF page) is decoded in the
-background at screen size. The frame starts on the whole picture: drag a
-corner or an edge to crop, drag inside to move it, drag outside to draw a new
-one. Presets lock the proportions. Enter crops, Escape cancels.
+The popup is sized to the picture (or PDF page) right away, from its header;
+the picture itself is decoded in the background at exactly the size shown.
+The frame starts on the whole picture: drag a corner or an edge to crop, drag
+inside to move it, drag outside to draw a new one. Presets lock the
+proportions. Enter crops, Escape cancels.
 
 All selection maths happen in source units (pixels of the upright image, or
 points of the visible PDF page), so nothing drifts with screen scaling.
@@ -12,18 +13,19 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
 
 from ..paths import kind_of
-from .editor_base import EditorWindow, Loader, qimage_from_pil, qimage_from_rgb
+from .editor_base import (EditorWindow, Loader, fit_view, qimage_from_pil,
+                          qimage_from_rgb)
 from .theme import MUTED, font
 
 PRESETS = [("Libre", None), ("Original", "orig"), ("1:1", 1.0), ("4:5", 4 / 5),
            ("3:4", 3 / 4), ("16:9", 16 / 9), ("9:16", 9 / 16)]
 HANDLE_HIT = 14     # px around a handle that grabs it
-MARGIN = 36         # px around the picture
+MARGIN = 12         # px around the picture (room for the handles)
 MIN_VIEW = 12       # smallest frame, in screen px
 
 
@@ -48,6 +50,25 @@ def load_image_preview(path: str, max_w: int, max_h: int):
     return qimage_from_pil(up), full
 
 
+def probe_size(path: str, page: int = 0, password=None):
+    """Size of what the editor will show, read without decoding it (fast):
+    (width, height, page_count, page_index). Pixels for an image, points of
+    the visible page for a PDF. Falls back to 4:3 when unreadable."""
+    try:
+        if kind_of(path) == "pdf":
+            from ..actions import pdf as _pdf
+            with _pdf.open_pdf(path, password) as doc:
+                n = doc.page_count
+                i = max(0, min(page if page >= 0 else n - 1, n - 1))
+                r = doc[i].rect
+                return r.width, r.height, n, i
+        from ..actions import images as _images
+        w, h = _images.oriented_size(path)
+        return float(w), float(h), 1, 0
+    except Exception:
+        return 800.0, 600.0, 1, 0
+
+
 def load_pdf_preview(path: str, index: int, max_w: int, max_h: int, password):
     from ..actions import pdf as _pdf
     data, w, h, stride, count, size, index = _pdf.render_page(path, index, max_w, max_h,
@@ -62,7 +83,7 @@ class CropCanvas(QWidget):
     def __init__(self):
         super().__init__()
         self.setMouseTracking(True)
-        self.setMinimumSize(320, 240)
+        self.setMinimumSize(120, 90)
         self.image = None
         self.full = (1.0, 1.0)
         self.sel = QRectF()
@@ -344,23 +365,31 @@ class CropCanvas(QWidget):
                 y = s.top() + s.height() * k / 3
                 p.drawLine(QPointF(x, s.top()), QPointF(x, s.bottom()))
                 p.drawLine(QPointF(s.left(), y), QPointF(s.right(), y))
-        p.setPen(QPen(QColor(255, 255, 255, 230), 1.5))
+        # frame, corner marks and edge bars: white over a dark halo, so they
+        # show on dark photos and on white document pages alike
+        halo = QColor(0, 0, 0, 140)
+        p.setPen(QPen(halo, 3.5))
         p.drawRect(s)
-        # corner marks and edge bars
-        pen = QPen(QColor(255, 255, 255), 4)
-        pen.setCapStyle(Qt.SquareCap)
-        p.setPen(pen)
+        p.setPen(QPen(QColor(255, 255, 255, 235), 1.5))
+        p.drawRect(s)
         L = min(20.0, s.width() / 3, s.height() / 3)
-        for (cx, cy, sx, sy) in ((s.left(), s.top(), 1, 1), (s.right(), s.top(), -1, 1),
-                                 (s.right(), s.bottom(), -1, -1), (s.left(), s.bottom(), 1, -1)):
-            p.drawLine(QPointF(cx, cy), QPointF(cx + sx * L, cy))
-            p.drawLine(QPointF(cx, cy), QPointF(cx, cy + sy * L))
         E = min(18.0, s.width() / 4, s.height() / 4)
         mx, my = s.center().x(), s.center().y()
-        p.drawLine(QPointF(mx - E / 2, s.top()), QPointF(mx + E / 2, s.top()))
-        p.drawLine(QPointF(mx - E / 2, s.bottom()), QPointF(mx + E / 2, s.bottom()))
-        p.drawLine(QPointF(s.left(), my - E / 2), QPointF(s.left(), my + E / 2))
-        p.drawLine(QPointF(s.right(), my - E / 2), QPointF(s.right(), my + E / 2))
+        marks = []
+        for (cx, cy, sx, sy) in ((s.left(), s.top(), 1, 1), (s.right(), s.top(), -1, 1),
+                                 (s.right(), s.bottom(), -1, -1), (s.left(), s.bottom(), 1, -1)):
+            marks.append((QPointF(cx, cy), QPointF(cx + sx * L, cy)))
+            marks.append((QPointF(cx, cy), QPointF(cx, cy + sy * L)))
+        marks += [(QPointF(mx - E / 2, s.top()), QPointF(mx + E / 2, s.top())),
+                  (QPointF(mx - E / 2, s.bottom()), QPointF(mx + E / 2, s.bottom())),
+                  (QPointF(s.left(), my - E / 2), QPointF(s.left(), my + E / 2)),
+                  (QPointF(s.right(), my - E / 2), QPointF(s.right(), my + E / 2))]
+        for color, width in ((halo, 6.5), (QColor(255, 255, 255), 4.0)):
+            pen = QPen(color, width)
+            pen.setCapStyle(Qt.SquareCap)
+            p.setPen(pen)
+            for a, b in marks:
+                p.drawLine(a, b)
 
 
 class CropEditor(EditorWindow):
@@ -370,80 +399,96 @@ class CropEditor(EditorWindow):
     def __init__(self, path: str, password: str | None = None):
         self.path = path
         self.is_pdf = kind_of(path) == "pdf"
-        name = os.path.basename(path)
-        super().__init__(name, "Glisse les coins ou les bords · Entrée pour rogner · "
-                               "Échap pour annuler")
+        super().__init__(os.path.basename(path), "Glisse les coins · Entrée pour rogner")
         self.password = password
         self.canvas = CropCanvas()
         self.canvas.changed.connect(self._sync)
         self.canvas.double_clicked.connect(self.validate)
-        self.center.addWidget(self.canvas, 1)
+        self.center.addWidget(self.canvas, 0, Qt.AlignCenter)
 
         self._preset_btns = []
         for label, a in PRESETS:
-            b = QPushButton(label)
-            b.setCheckable(True)
+            b = self.chip(label)
             b.setChecked(a is None)
             b.clicked.connect(lambda _=False, asp=a, btn=b: self._preset(asp, btn))
-            self.bar.addWidget(b)
+            self.tools.addWidget(b)
             self._preset_btns.append(b)
-        self.bar.addSpacing(12)
+        self.tools.addStretch(1)
         self.size_label = QLabel("")
         self.size_label.setObjectName("hint")
-        self.bar.addWidget(self.size_label)
-        self.bar.addStretch(1)
+        self.tools.addWidget(self.size_label)
 
         self.page = 0
         self.page_count = 1
         if self.is_pdf:
-            self.prev_btn = QPushButton("‹")
-            self.prev_btn.setFixedWidth(40)
+            self.prev_btn = self.chip("‹", checkable=False)
             self.prev_btn.clicked.connect(lambda: self._goto(self.page - 1))
-            self.page_label = QLabel("Page 1")
-            self.next_btn = QPushButton("›")
-            self.next_btn.setFixedWidth(40)
+            self.page_label = QLabel("")
+            self.page_label.setObjectName("hint")
+            self.next_btn = self.chip("›", checkable=False)
             self.next_btn.clicked.connect(lambda: self._goto(self.page + 1))
             self.all_pages = QCheckBox("Toutes les pages")
             self.all_pages.setChecked(True)
-            for w in (self.prev_btn, self.page_label, self.next_btn, self.all_pages):
+            self.all_pages.setFocusPolicy(Qt.NoFocus)
+            for w in (self.prev_btn, self.page_label, self.next_btn):
                 self.bar.addWidget(w)
-            self.bar.addSpacing(16)
-
-        reset = QPushButton("Réinitialiser")
-        reset.setObjectName("ghost")
-        reset.clicked.connect(self.canvas.reset)
+            self.bar.addSpacing(6)
+            self.bar.addWidget(self.all_pages)
+        else:
+            reset = QPushButton("Tout")
+            reset.setObjectName("ghost")
+            reset.setToolTip("Reprendre toute l'image")
+            reset.setFocusPolicy(Qt.NoFocus)
+            reset.clicked.connect(self.canvas.reset)
+            self.bar.addWidget(reset)
+        self.bar.addStretch(1)
         cancel = QPushButton("Annuler")
         cancel.setObjectName("ghost")
+        cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
         self.ok_btn = QPushButton("Rogner")
         self.ok_btn.setObjectName("primary")
         self.ok_btn.setEnabled(False)
+        self.ok_btn.setFocusPolicy(Qt.NoFocus)
         self.ok_btn.clicked.connect(self.validate)
-        for w in (reset, cancel, self.ok_btn):
-            self.bar.addWidget(w)
+        self.bar.addWidget(cancel)
+        self.bar.addWidget(self.ok_btn)
 
         self._loader = Loader(self)
         self._loader.done.connect(self._loaded)
         self._token = 0
+        self._keep_rel = None
 
-    def start(self) -> None:
-        self.open_on_cursor_screen()
+    def start(self, anchor=None) -> None:
+        if anchor is not None:
+            self.anchor = anchor
+        w, h, count, index = probe_size(self.path, 0, self.password)
+        self.page_count, self.page = count, index
+        room_w, room_h = self.room(520, 580) if self.is_pdf else self.room()
+        dpr = self.devicePixelRatioF() or 1.0
+        vw, vh = fit_view(w, h, room_w - 2 * MARGIN, room_h - 2 * MARGIN,
+                          min_side=300, max_scale=1.0 / dpr if not self.is_pdf else 1.6)
+        self.canvas.setFixedSize(QSize(vw + 2 * MARGIN, vh + 2 * MARGIN))
+        if self.is_pdf:
+            self._update_nav()
+        self.open_at()
         self._load()
 
     def _target_px(self) -> tuple[int, int]:
         dpr = self.devicePixelRatioF() or 1.0
-        w = max(400, int((self.width() - 2 * MARGIN) * dpr))
-        h = max(300, int((self.height() - 140 - 2 * MARGIN) * dpr))
+        w = max(64, int((self.canvas.width() - 2 * MARGIN) * dpr))
+        h = max(64, int((self.canvas.height() - 2 * MARGIN) * dpr))
         return w, h
 
     def _load(self) -> None:
         self._token += 1
         token = self._token
         w, h = self._target_px()
+        page, path, pw = self.page, self.path, self.password
         if self.is_pdf:
-            fn = lambda: (token, load_pdf_preview(self.path, self.page, w, h, self.password))
+            fn = lambda: (token, load_pdf_preview(path, page, w, h, pw))
         else:
-            fn = lambda: (token, load_image_preview(self.path, w, h))
+            fn = lambda: (token, load_image_preview(path, w, h))
         self.canvas.image = None
         self.canvas.message = "Chargement…"
         self.canvas.update()
@@ -459,11 +504,10 @@ class CropEditor(EditorWindow):
         token, payload = res
         if token != self._token:
             return  # an older page finished late
-        keep = getattr(self, "_keep_rel", None)
         if self.is_pdf:
             img, size, count, index = payload
             self.page_count, self.page = count, index
-            self.canvas.set_image(img, size, keep_rel=keep)
+            self.canvas.set_image(img, size, keep_rel=self._keep_rel)
             self._update_nav()
         else:
             img, full = payload
@@ -472,9 +516,12 @@ class CropEditor(EditorWindow):
         self._sync()
 
     def _update_nav(self) -> None:
-        self.page_label.setText(f"Page {self.page + 1} / {self.page_count}")
+        self.page_label.setText(f"{self.page + 1} / {self.page_count}")
         self.prev_btn.setEnabled(self.page > 0)
         self.next_btn.setEnabled(self.page < self.page_count - 1)
+        many = self.page_count > 1
+        for w in (self.prev_btn, self.page_label, self.next_btn, self.all_pages):
+            w.setVisible(many)
 
     def _goto(self, index: int) -> None:
         if not (0 <= index < self.page_count) or index == self.page:
@@ -508,7 +555,7 @@ class CropEditor(EditorWindow):
         if self.canvas.image is None:
             return
         if self.is_pdf:
-            page = None if self.all_pages.isChecked() else self.page
+            page = None if self.all_pages.isChecked() or self.page_count == 1 else self.page
             self.finish({"crop_rel": self.canvas.rel_box(), "crop_page": page})
         else:
             self.finish({"crop_box": self.canvas.pixel_box()})

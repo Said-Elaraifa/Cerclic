@@ -1,4 +1,5 @@
-"""Image actions: convert, compress, resize, rotate, crop.
+"""Image actions: convert, compress, resize, rotate, mirror, crop, remove
+private information, assemble several pictures into one.
 
 Every function takes a source path and returns the path it wrote, always a new
 file beside the source. Results are upright (EXIF orientation applied), keep the
@@ -7,6 +8,7 @@ HEIC/HEIF photos are read through pillow-heif; AVIF is native in Pillow.
 """
 from __future__ import annotations
 
+import io
 import os
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
@@ -393,3 +395,263 @@ def crop_image(src: str, box: Sequence[float], quality: int | None = None) -> st
         raise NothingToDo("Le cadre couvre toute l'image : rien à rogner.")
     pic = pic.map(lambda f: f.crop((left, top, right, bottom)))
     return _write(src, pic, "cropped", quality=quality)
+
+
+def mirror_image(src: str, quality: int | None = None) -> str:
+    """Flip left to right (a selfie the right way round)."""
+    pic = load(src).map(lambda f: f.transpose(Image.Transpose.FLIP_LEFT_RIGHT))
+    return _write(src, pic, "mirrored", quality=quality)
+
+
+# ----- private information --------------------------------------------------------
+
+def _minimal_exif(orientation: int) -> bytes:
+    ex = Image.Exif()
+    ex[0x0112] = orientation
+    raw = ex.tobytes()
+    return raw if raw.startswith(b"Exif\x00\x00") else b"Exif\x00\x00" + raw
+
+
+def _strip_jpeg(data: bytes) -> tuple[bytes, bool]:
+    """Remove EXIF (GPS, camera, dates), XMP, IPTC, comments and anything glued
+    after the picture (phones append extra images and videos there, with their
+    own GPS) from a JPEG, without re-encoding it. The colour profile and the
+    orientation are kept."""
+    if data[:2] != b"\xff\xd8":
+        raise UserError("JPEG illisible.")
+    orientation = 1
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            orientation = int(im.getexif().get(0x0112, 1) or 1)
+    except Exception:
+        pass
+    out = bytearray(b"\xff\xd8")
+    state = {"removed": False, "inserted": orientation == 1}
+
+    def insert_orientation():
+        if not state["inserted"]:
+            out.extend(_app1(_minimal_exif(orientation)))
+            state["inserted"] = True
+
+    i, n = 2, len(data)
+    while True:
+        if i >= n:
+            raise UserError("JPEG incomplet.")
+        if data[i] != 0xFF:
+            raise UserError("JPEG endommagé.")
+        while i < n and data[i] == 0xFF:          # fill bytes
+            i += 1
+        if i >= n:
+            raise UserError("JPEG incomplet.")
+        marker = data[i]
+        i += 1
+        if marker == 0xD9:                         # end of the picture
+            insert_orientation()
+            out += b"\xff\xd9"
+            if data[i:].strip(b"\x00"):
+                state["removed"] = True            # appended images, videos...
+            break
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            out += bytes((0xFF, marker))
+            continue
+        if i + 2 > n:
+            raise UserError("JPEG endommagé.")
+        length = int.from_bytes(data[i:i + 2], "big")
+        if length < 2 or i + length > n:
+            raise UserError("JPEG endommagé.")
+        seg = b"\xff" + bytes((marker,)) + data[i:i + length]
+        body = data[i + 2:i + length]
+        i += length
+        if marker == 0xDA:                         # scan: header, then coded data
+            insert_orientation()
+            out += seg
+            j = i
+            while True:
+                j = data.find(b"\xff", j)
+                if j < 0 or j + 1 >= n:
+                    raise UserError("JPEG incomplet.")
+                nxt = data[j + 1]
+                if nxt == 0x00 or 0xD0 <= nxt <= 0xD7:
+                    j += 2
+                    continue
+                break
+            out += data[i:j]
+            i = j
+            continue
+        drop = marker in (0xE1, 0xED, 0xFE) or (0xE3 <= marker <= 0xEF and marker != 0xEE)
+        if marker == 0xE2 and not body.startswith(b"ICC_PROFILE\x00"):
+            drop = True                            # multi-picture index, FlashPix...
+        if drop:
+            if not (marker == 0xE1 and orientation != 1
+                    and body == _minimal_exif(orientation)):
+                state["removed"] = True          # (our own orientation tag is no info)
+            continue
+        if marker != 0xE0:
+            insert_orientation()
+        out += seg
+    return bytes(out), state["removed"]
+
+
+def _app1(payload: bytes) -> bytes:
+    return b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
+
+
+_PNG_PRIVATE = {b"tEXt", b"zTXt", b"iTXt", b"eXIf", b"tIME"}
+
+
+def _strip_png(data: bytes) -> tuple[bytes, bool]:
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise UserError("PNG illisible.")
+    out = bytearray(data[:8])
+    removed = False
+    i = 8
+    while i + 8 <= len(data):
+        length = int.from_bytes(data[i:i + 4], "big")
+        kind = data[i + 4:i + 8]
+        end = i + 12 + length
+        if kind in _PNG_PRIVATE:
+            removed = True
+        else:
+            out += data[i:end]
+        i = end
+        if kind == b"IEND":
+            break
+    return bytes(out), removed
+
+
+def _strip_webp(data: bytes) -> tuple[bytes, bool]:
+    if data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise UserError("WEBP illisible.")
+    chunks = []
+    removed = False
+    i = 12
+    while i + 8 <= len(data):
+        kind = data[i:i + 4]
+        size = int.from_bytes(data[i + 4:i + 8], "little")
+        body = data[i + 8:i + 8 + size]
+        if kind in (b"EXIF", b"XMP "):
+            removed = True
+        else:
+            if kind == b"VP8X" and len(body) >= 1:
+                body = bytes([body[0] & ~0x0C]) + body[1:]      # no EXIF / XMP flags
+            chunks.append(kind + len(body).to_bytes(4, "little") + body
+                          + (b"\x00" if size % 2 else b""))
+        i += 8 + size + (size % 2)
+    payload = b"WEBP" + b"".join(chunks)
+    return b"RIFF" + len(payload).to_bytes(4, "little") + payload, removed
+
+
+def strip_metadata(src: str, quality: int | None = None) -> str:
+    """Copy without private information: GPS position, camera and phone model,
+    dates, author, comments. JPEG, PNG and WEBP are not re-encoded (no quality
+    loss); the picture stays upright and keeps its colours."""
+    e = ext_of(src)
+    with open(src, "rb") as f:
+        data = f.read()
+    try:
+        if e in (".jpg", ".jpeg", ".jfif"):
+            clean, removed = _strip_jpeg(data)
+        elif e == ".png":
+            clean, removed = _strip_png(data)
+        elif e == ".webp":
+            clean, removed = _strip_webp(data)
+        else:
+            clean, removed = None, True
+    except UserError:
+        clean, removed = None, True             # unusual file: re-encode it instead
+    if clean is not None:
+        if not removed:
+            raise NothingToDo("Cette image ne contient aucune information privée.")
+        out = output_for(src, "clean")
+        with open(out, "wb") as f:
+            f.write(clean)
+        try:
+            with Image.open(out) as check_im:
+                check_im.load()
+            return out
+        except Exception:
+            os.remove(out)                       # fall back to a re-encoded copy
+    pic = load(src)
+    pic = Picture(pic.frames, pic.durations, pic.loop, pic.icc, None, pic.dpi,
+                  pic.source_format)
+    return _write(src, pic, "clean", quality=quality)
+
+
+# ----- several pictures into one ------------------------------------------------------
+
+def assemble_images(srcs: Sequence[str], layout: str = "row",
+                    quality: int | None = None, ctx=None) -> str:
+    """Put pictures side by side ("row"), one under the other ("column") or in
+    a grid, in the given order, into one new picture beside the first one."""
+    from statistics import median
+    srcs = list(srcs)
+    if len(srcs) < 2:
+        raise UserError("Il faut au moins deux images.")
+    frames = []
+    for k, src in enumerate(srcs):
+        if ctx is not None:
+            ctx.check()
+            ctx.progress(k / (len(srcs) + 1), f"Image {k + 1} sur {len(srcs)}")
+        pic = load(src).to_srgb()
+        im = _to_8bit(pic.frames[0])
+        alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
+        frames.append(im.convert("RGBA" if alpha else "RGB"))
+    has_alpha = any(f.mode == "RGBA" for f in frames)
+    mode = "RGBA" if has_alpha else "RGB"
+    bg = (255, 255, 255, 0) if has_alpha else (255, 255, 255)
+
+    def fit(im, w, h):
+        return im.resize((max(1, w), max(1, h)), Image.Resampling.LANCZOS)
+
+    if layout == "row":
+        H = int(min(2400, median(f.height for f in frames)))
+        parts = [fit(f, round(f.width * H / f.height), H) for f in frames]
+        canvas = Image.new(mode, (sum(p.width for p in parts), H), bg)
+        x = 0
+        for p in parts:
+            canvas.paste(p, (x, 0))
+            x += p.width
+    elif layout == "column":
+        W = int(min(2400, median(f.width for f in frames)))
+        parts = [fit(f, W, round(f.height * W / f.width)) for f in frames]
+        canvas = Image.new(mode, (W, sum(p.height for p in parts)), bg)
+        y = 0
+        for p in parts:
+            canvas.paste(p, (0, y))
+            y += p.height
+    else:  # grid
+        import math as _math
+        n = len(frames)
+        cols = _math.ceil(_math.sqrt(n))
+        rows = _math.ceil(n / cols)
+        cw = int(min(1200, median(f.width for f in frames)))
+        ch = int(cw * median(f.height / f.width for f in frames))
+        gap = max(4, cw // 60)
+        canvas = Image.new(mode, (cols * cw + (cols + 1) * gap,
+                                  rows * ch + (rows + 1) * gap), bg)
+        for k, f in enumerate(frames):
+            s = min(cw / f.width, ch / f.height)
+            p = fit(f, round(f.width * s), round(f.height * s))
+            r, c = divmod(k, cols)
+            x = gap + c * (cw + gap) + (cw - p.width) // 2
+            y = gap + r * (ch + gap) + (ch - p.height) // 2
+            canvas.paste(p, (x, y))
+    if max(canvas.size) > 16000:                     # JPEG and viewers have limits
+        canvas.thumbnail((16000, 16000), Image.Resampling.LANCZOS)
+    fmt = "png" if has_alpha else "jpg"
+    out = output_for(srcs[0], "assembled", new_ext=FORMATS[fmt][1])
+    if ctx is not None:
+        ctx.progress(len(srcs) / (len(srcs) + 1), "Assemblage")
+    save(Picture([canvas]), out, fmt, quality=quality)
+    return out
+
+
+def clipboard_image(src: str, max_side: int = 8000):
+    """The picture, upright and not bigger than max_side, for the clipboard."""
+    pic = load(src).to_srgb()
+    im = _to_8bit(pic.frames[0])
+    alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
+    im = im.convert("RGBA" if alpha else "RGB")
+    if max(im.size) > max_side:
+        im.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+    return im

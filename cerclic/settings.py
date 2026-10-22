@@ -10,7 +10,9 @@ DEFAULTS: dict = {
     "signature": "",            # path to the signature PNG (drawn or imported)
     "autostart": True,          # launch with Windows
     "context_menu": True,       # "Cerclic" entry in the right-click menu
-    "hotkey": True,             # Ctrl+Alt+Space opens the wheel on the selection
+    "hotkey": True,             # the keyboard shortcut opens the wheel on the selection
+    "hotkey_mods": 0x3,         # its modifiers (Windows MOD_* flags): Ctrl + Alt
+    "hotkey_vk": 0x20,          # its key (Windows virtual-key code): Space
     "classic_menu": False,      # Windows 11: show the full right-click menu at once
     "classic_menu_by_cerclic": False,  # we set it, so we may undo it on uninstall
     "jpg_quality": 90,

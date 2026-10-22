@@ -49,6 +49,16 @@ BUTTON_QSS = (
     f"QPushButton:checked{{background:{ACCENT};color:white;}}"
 )
 
+SCROLL_QSS = (
+    "QScrollBar:vertical{background:transparent;width:10px;margin:2px;}"
+    "QScrollBar::handle:vertical{background:#3A3F4E;border-radius:4px;min-height:30px;}"
+    "QScrollBar::handle:vertical:hover{background:#4A5063;}"
+    "QScrollBar::add-line,QScrollBar::sub-line{height:0;width:0;}"
+    "QScrollBar::add-page,QScrollBar::sub-page{background:transparent;}"
+    "QScrollBar:horizontal{background:transparent;height:10px;margin:2px;}"
+    "QScrollBar::handle:horizontal{background:#3A3F4E;border-radius:4px;min-width:30px;}"
+)
+
 INPUT_QSS = (
     f"QLineEdit{{background:{BG};color:{TEXT};border:1px solid {BORDER};"
     "border-radius:8px;padding:8px 10px;selection-background-color:#4C8DFF;}"

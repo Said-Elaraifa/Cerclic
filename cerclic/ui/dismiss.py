@@ -23,10 +23,14 @@ _ACTIVITY = {QEvent.MouseMove, QEvent.MouseButtonPress, QEvent.KeyPress,
 class DismissGuard(QObject):
     GRACE_S = 1.5
 
-    def __init__(self, widget, on_dismiss, leave_s: float = 2.5, idle_s: float = 60.0):
+    def __init__(self, widget, on_dismiss, leave_s: float = 2.5, idle_s: float = 60.0,
+                 keep_once_used: bool = False):
         super().__init__(widget)
         self.widget, self.on_dismiss = widget, on_dismiss
         self.leave_s, self.idle_s = leave_s, idle_s
+        # An editor the user already worked in is not thrown away by a click
+        # elsewhere (only by Escape, its buttons, or a long inactivity).
+        self.keep_once_used = keep_once_used
         self._shown = self._activity = time.monotonic()
         self._left_at: float | None = None
         self._touched = False      # the user pressed inside the popup
@@ -39,7 +43,20 @@ class DismissGuard(QObject):
         self._shown = self._activity = time.monotonic()
         self._left_at = None
         self._touched = self._retook = False
+        from PySide6.QtWidgets import QWidget
+        try:
+            for child in self.widget.findChildren(QWidget):   # clicks on the content
+                child.removeEventFilter(self)
+                child.installEventFilter(self)
+        except RuntimeError:
+            pass
         self._timer.start()
+
+    def resume(self) -> None:
+        """Start again after a pause, keeping what the user already did."""
+        touched = self._touched
+        self.start()
+        self._touched = touched
 
     def stop(self) -> None:
         self._timer.stop()
@@ -49,7 +66,7 @@ class DismissGuard(QObject):
         if t in _ACTIVITY:
             self._activity = time.monotonic()
             self._left_at = None
-            if t == QEvent.MouseButtonPress:
+            if t in (QEvent.MouseButtonPress, QEvent.KeyPress):
                 self._touched = True
         elif t == QEvent.Enter:
             self._left_at = None
@@ -72,6 +89,8 @@ class DismissGuard(QObject):
             return
         if not visible or QGuiApplication.applicationState() == Qt.ApplicationActive:
             return
+        if self.keep_once_used and self._touched:
+            return
         early = time.monotonic() - self._shown < self.GRACE_S and not self._touched
         if early:
             if not self._retook:   # the launching window took the focus back
@@ -93,5 +112,6 @@ class DismissGuard(QObject):
         if now - self._activity > self.idle_s:
             self._dismiss("inactivité")
         elif (not active and self._left_at is not None
-              and now - self._left_at > self.leave_s):
+              and now - self._left_at > self.leave_s
+              and not (self.keep_once_used and self._touched)):
             self._dismiss("pointeur parti")

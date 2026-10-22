@@ -73,6 +73,11 @@ def probe(src: str) -> Probe:
     if v:
         info.has_video = True
         info.width, info.height = int(v.group(1)), int(v.group(2))
+        # phone videos filmed upright are stored sideways with a rotation flag
+        rot = re.search(r"rotation of (-?\d+(?:\.\d+)?) degrees", text) or \
+            re.search(r"\brotate\s*:\s*(-?\d+)", text)
+        if rot and round(abs(float(rot.group(1)))) % 180 == 90:
+            info.width, info.height = info.height, info.width
     elif re.search(r"Stream #\d+:\d+.*?: Video:", text):
         info.has_video = True
     return info
@@ -230,4 +235,161 @@ def extract_mp3(src: str, ctx=None) -> str:
     out = output_for(src, "audio", new_ext=".mp3")
     _run(["-i", src, "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "2", out],
          info.duration, ctx, "Extraction du son")
+    return out
+
+
+# ----- cut, mute, rotate -----------------------------------------------------------------
+
+# Audio formats kept as they are when cutting a sound file: (extension, codec args)
+_AUDIO_KEEP = {
+    ".mp3": (".mp3", ["-c:a", "libmp3lame", "-q:a", "2"]),
+    ".m4a": (".m4a", ["-c:a", "aac", "-b:a", "192k"]),
+    ".aac": (".m4a", ["-c:a", "aac", "-b:a", "192k"]),
+    ".wav": (".wav", ["-c:a", "pcm_s16le"]),
+    ".flac": (".flac", ["-c:a", "flac"]),
+    ".ogg": (".ogg", ["-c:a", "libvorbis", "-q:a", "5"]),
+    ".oga": (".ogg", ["-c:a", "libvorbis", "-q:a", "5"]),
+    ".opus": (".opus", ["-c:a", "libopus", "-b:a", "128k"]),
+}
+_MP3 = (".mp3", ["-c:a", "libmp3lame", "-q:a", "2"])
+
+
+def _fmt_time(t: float) -> str:
+    return f"{t:.3f}"
+
+
+def trim_media(src: str, start: float, end: float, ctx=None) -> str:
+    """Keep from `start` to `end` seconds. Videos become an MP4 readable
+    everywhere; sounds keep their format (MP3 for the rarer ones)."""
+    from ..paths import ext_of, kind_of
+    info = probe(src)
+    duration = info.duration
+    start = max(0.0, float(start))
+    end = float(end)
+    if duration > 0:
+        end = min(end, duration)
+    if end - start < 0.1:
+        raise UserError("Le passage à garder est trop court.")
+    if duration > 0 and start <= 0.05 and end >= duration - 0.05:
+        from ..errors import NothingToDo
+        raise NothingToDo("Le passage choisi est la totalité du fichier.")
+    length = end - start
+    if kind_of(src) == "video":
+        _need_video(info)
+        out = output_for(src, "cut", new_ext=".mp4")
+        _run(["-ss", _fmt_time(start), "-i", src, "-t", _fmt_time(length),
+              "-map", "0:v:0", "-map", "0:a:0?", "-vf", EVEN,
+              "-c:v", "libx264", "-crf", "20", "-preset", "faster",
+              "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
+              "-movflags", "+faststart", out], length, ctx, "Découpage")
+        return out
+    if not info.has_audio:
+        raise UserError("Aucun son dans ce fichier.")
+    ext, codec = _AUDIO_KEEP.get(ext_of(src), _MP3)
+    out = output_for(src, "cut", new_ext=ext)
+    _run(["-ss", _fmt_time(start), "-i", src, "-t", _fmt_time(length),
+          "-map", "0:a:0", "-vn", *codec, out], length, ctx, "Découpage")
+    return out
+
+
+def mute_video(src: str, ctx=None) -> str:
+    """Same video without its sound, not re-encoded (instant, no quality loss)."""
+    from ..errors import NothingToDo
+    from ..paths import ext_of
+    info = probe(src)
+    _need_video(info)
+    if not info.has_audio:
+        raise NothingToDo("Cette vidéo n'a déjà pas de son.")
+    out = output_for(src, "muted", new_ext=ext_of(src) or ".mp4")
+    try:
+        _run(["-i", src, "-map", "0:v", "-c", "copy", "-an", out],
+             info.duration, ctx, "Suppression du son")
+        return out
+    except UserError:
+        try:
+            os.remove(out)
+        except OSError:
+            pass
+    out = output_for(src, "muted", new_ext=".mp4")       # odd file: re-encode it
+    _run(["-i", src, "-map", "0:v:0", "-an", "-vf", EVEN, "-c:v", "libx264",
+          "-crf", "20", "-preset", "faster", "-pix_fmt", "yuv420p",
+          "-movflags", "+faststart", out], info.duration, ctx, "Suppression du son")
+    return out
+
+
+_TRANSPOSE = {90: "transpose=1", 270: "transpose=2", 180: "transpose=1,transpose=1"}
+
+
+def rotate_video(src: str, degrees: int = 90, ctx=None) -> str:
+    """Turn the picture clockwise by 90, 180 or 270 degrees (a phone video
+    filmed sideways), as an MP4 readable everywhere."""
+    deg = int(degrees) % 360
+    if deg not in _TRANSPOSE:
+        raise ValueError("rotation must be a multiple of 90 degrees")
+    info = probe(src)
+    _need_video(info)
+    out = output_for(src, "rotated", new_ext=".mp4")
+    _run(["-i", src, "-map", "0:v:0", "-map", "0:a:0?",
+          "-vf", f"{_TRANSPOSE[deg]},{EVEN}", "-c:v", "libx264", "-crf", "20",
+          "-preset", "faster", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
+          "-movflags", "+faststart", out], info.duration, ctx, "Rotation")
+    return out
+
+
+def audio_to_mp3(src: str, ctx=None) -> str:
+    """Any sound file (WhatsApp voice note, M4A, WAV...) as an MP3 that plays
+    everywhere."""
+    from ..errors import NothingToDo
+    from ..paths import ext_of
+    if ext_of(src) == ".mp3":
+        raise NothingToDo("C'est déjà un MP3.")
+    info = probe(src)
+    if not info.has_audio:
+        raise UserError("Aucun son dans ce fichier.")
+    out = output_for(src, "mp3", new_ext=".mp3")
+    _run(["-i", src, "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "2", out],
+         info.duration, ctx, "Conversion en MP3")
+    return out
+
+
+# ----- previews for the cutting popup ------------------------------------------------------
+
+def _capture(args: list[str], timeout: float = 20.0) -> bytes:
+    """Run ffmpeg and return what it writes on stdout (a PNG)."""
+    proc = subprocess.run([ffmpeg_path(), "-hide_banner", "-nostdin", "-loglevel", "error",
+                           *args], stdin=subprocess.DEVNULL, capture_output=True,
+                          creationflags=_NO_WINDOW, timeout=timeout)
+    if proc.returncode != 0 or not proc.stdout:
+        raise UserError("Aperçu impossible.")
+    return proc.stdout
+
+
+def frame_png(src: str, t: float, max_w: int, max_h: int) -> bytes:
+    """One frame at `t` seconds, fitted in max_w x max_h, as PNG bytes."""
+    vf = (f"scale=w={int(max_w)}:h={int(max_h)}:force_original_aspect_ratio=decrease,"
+          "format=rgb24")
+    return _capture(["-ss", _fmt_time(max(0.0, t)), "-i", src, "-frames:v", "1",
+                     "-vf", vf, "-f", "image2pipe", "-c:v", "png", "-"])
+
+
+def waveform_png(src: str, width: int, height: int, color: str = "#F2A93B") -> bytes:
+    """The sound drawn as a waveform, as PNG bytes (transparent background)."""
+    graph = (f"aformat=channel_layouts=mono,showwavespic=s={int(width)}x{int(height)}"
+             f":colors={color}:scale=sqrt")
+    return _capture(["-i", src, "-filter_complex", graph, "-frames:v", "1",
+                     "-f", "image2pipe", "-c:v", "png", "-"], timeout=120.0)
+
+
+def compress_audio(src: str, ctx=None) -> str:
+    """Lighter MP3 (96 kbit/s, plenty for voice and fine for music on a phone)."""
+    from ..errors import NothingToDo
+    info = probe(src)
+    if not info.has_audio:
+        raise UserError("Aucun son dans ce fichier.")
+    out = output_for(src, "compressed", new_ext=".mp3")
+    _run(["-i", src, "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-b:a", "96k", out],
+         info.duration, ctx, "Compression")
+    if os.path.getsize(out) >= os.path.getsize(src) * 0.95:
+        os.remove(out)
+        raise NothingToDo("Ce son est déjà léger.")
     return out

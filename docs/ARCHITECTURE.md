@@ -16,17 +16,21 @@ cerclic/
     images.py  pdf.py  video.py  registry.py  common.py
   win/                    Windows uniquement
     shell.py              entrée du clic droit, démarrage avec Windows, menu complet de Windows 11
-    hotkey.py             raccourci Ctrl+Alt+Espace (RegisterHotKey)
+    hotkey.py             raccourci clavier choisi par l'utilisateur (RegisterHotKey) et ses règles
     selection.py          fichiers sélectionnés dans la fenêtre au premier plan (Shell.Application)
     foreground.py         mise au premier plan
   ui/                     PySide6
-    radial.py             la roue (catégories, actions, « Plus », variantes)
-    dismiss.py            fermeture de la roue et des bulles quand on va ailleurs
+    radial.py             la roue (catégories, actions, « Plus », variantes, aperçu au centre)
+    dismiss.py            fermeture de la roue, des bulles et des popups quand on va ailleurs
     bubble.py             saisie d'un mot de passe ou d'un texte à la place de la roue
-    crop_editor.py        rognage plein écran (image et PDF)
+    editor_base.py        le popup compact commun, ouvert là où était la roue
+    crop_editor.py        rognage (image et PDF)
     signature.py          dessin de la signature et placement sur la page
+    pages_editor.py       organisation des pages d'un PDF
+    trim_editor.py        découpe d'une vidéo ou d'un son
     cards.py              progression puis résultat, en bas à droite
-    settings_window.py  theme.py  icons.py  trayicon.py  editor_base.py
+    settings_window.py    la fenêtre de Cerclic : raccourci (enregistreur), clic droit, signature...
+    theme.py  icons.py  trayicon.py
 installer/cerclic.iss     installateur Inno Setup (par utilisateur, sans droits administrateur)
 ```
 
@@ -42,15 +46,25 @@ installer/cerclic.iss     installateur Inno Setup (par utilisateur, sans droits 
    chemins qui arrivent dans la même seconde rejoignent la roue déjà ouverte.
    Si Cerclic ne tourne pas, une seule copie le démarre (mutex
    `Local\Cerclic.Launch`), toutes attendent puis transmettent.
-2. **Ctrl+Alt+Espace**. `RegisterHotKey` : Windows ne prévient Cerclic que pour
+2. **Le raccourci clavier** (Ctrl+Alt+Espace au départ, modifiable dans la
+   fenêtre de Cerclic). `RegisterHotKey` : Windows ne prévient Cerclic que pour
    cette combinaison. Cerclic lit alors la sélection de la fenêtre de
    l'Explorateur au premier plan (onglets de Windows 11 compris) ou du Bureau.
+   Pendant l'enregistrement d'une nouvelle combinaison, l'ancienne est libérée ;
+   `hotkey.check()` refuse celles qui gêneraient la frappe (lettres seules,
+   Ctrl+C/V..., AltGr+chiffres qui tapent @ # €) ou Windows (Alt+F4...).
 3. **Fichiers glissés sur l'icône**, ou `Cerclic.exe --open <fichiers>` :
    même transmission, faite en Python par `launcher.py`.
 
 Cerclic n'écoute ni la souris ni le clavier en dehors de cela. La roue se
 ferme quand on clique ailleurs (perte du premier plan), sur Échap, ou si le
 pointeur s'éloigne alors que Windows a refusé de la mettre au premier plan.
+Les popups (rogner, signer, pages, découpe) s'ouvrent au même endroit, à la
+taille de ce qu'ils montrent, et restent dans l'écran ; une fois qu'on a
+travaillé dedans, un clic ailleurs ne les ferme plus (Échap ou Annuler).
+
+Lancer Cerclic depuis son icône (Bureau, menu Démarrer) ou cliquer sur son
+icône près de l'horloge ouvre sa fenêtre de réglages.
 
 Instance unique : un mutex `Local\Cerclic.Resident` par session ; deux comptes
 Windows ouverts en même temps ont chacun leur Cerclic.
@@ -65,7 +79,13 @@ Windows ouverts en même temps ont chacun leur Cerclic.
   testent sur n'importe quel système ; les éditeurs travaillent en unités de
   la source (pixels de l'image redressée, points de la page PDF visible).
 - **Une action = métadonnées + fonction** (`registry.ACTIONS`) : libellé,
-  catégorie, ce qu'il faut demander (`needs`), variantes (`choices`).
+  description courte (affichée au centre de la roue), catégorie, ce qu'il
+  faut demander (`needs`), variantes (`choices`).
+- **Threads et Qt** : le ramasse-miettes cyclique de Python ne tourne que sur
+  le thread de l'interface (désactivé, puis lancé régulièrement), sinon il
+  pourrait détruire une fenêtre Qt depuis un thread de travail. Les
+  chargements en arrière-plan rendent leur résultat par un relais qui vit
+  aussi longtemps que l'application, jamais à un popup déjà fermé.
 - **PDF tournés ou recadrés** : les coordonnées « vues par le lecteur » sont
   converties pour PyMuPDF ; filigrane et numéros sont posés via une page
   intermédiaire. Des tests vérifient le rendu sur des pages tournées de

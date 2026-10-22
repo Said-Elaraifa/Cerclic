@@ -15,6 +15,23 @@ import pymupdf  # noqa: E402
 HAS_FFMPEG = shutil.which("ffmpeg") is not None
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _gc_on_main_thread():
+    """As in the app: never let the cycle collector run in a worker thread
+    (it could destroy a Qt widget there)."""
+    import gc
+    gc.disable()
+    yield
+    gc.enable()
+
+
+@pytest.fixture(autouse=True)
+def _collect_after_each_test():
+    yield
+    import gc
+    gc.collect()
+
+
 @pytest.fixture(autouse=True)
 def _isolated_config(tmp_path, monkeypatch):
     """Settings and the request pipe never touch the real user profile."""
@@ -175,3 +192,36 @@ def silent_video(tmp_path):
 @pytest.fixture
 def long_video(tmp_path):
     return _video(tmp_path / "long.mp4", size="1280x720", duration=20)
+
+
+def _sound(path, duration=3, codec_args=()):
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+           "-i", f"sine=frequency=330:duration={duration}", *codec_args, str(path)]
+    subprocess.run(cmd, check=True)
+    return str(path)
+
+
+@pytest.fixture
+def m4a_sound(tmp_path):
+    return _sound(tmp_path / "voix.m4a", codec_args=("-c:a", "aac", "-b:a", "128k"))
+
+
+@pytest.fixture
+def wav_sound(tmp_path):
+    return _sound(tmp_path / "son.wav")
+
+
+@pytest.fixture
+def opus_sound(tmp_path):
+    return _sound(tmp_path / "note vocale.opus", codec_args=("-c:a", "libopus"))
+
+
+@pytest.fixture
+def mp3_sound(tmp_path):
+    return _sound(tmp_path / "chanson.mp3", duration=4,
+                  codec_args=("-c:a", "libmp3lame", "-b:a", "320k"))
+
+
+@pytest.fixture
+def long_clip(tmp_path):
+    return _video(tmp_path / "long.mp4", duration=4)

@@ -30,6 +30,12 @@ MERGE_GAP = 1.0
 MERGE_MAX = 60.0
 
 
+def _gc_now() -> None:
+    import gc
+    if not gc.isenabled():
+        gc.collect()
+
+
 def _summary(paths: list[str]) -> str:
     if len(paths) == 1:
         name = os.path.basename(paths[0])
@@ -202,7 +208,8 @@ class WheelSession:
         self._refresh_pending = False
         self.closed = False
         menu = registry.menu_for(paths)
-        self.wheel = Wheel(menu, registry.count_by_category(paths), _summary(paths))
+        self.wheel = Wheel(menu, registry.count_by_category(paths), _summary(paths),
+                           preview=paths[0] if paths else None)
         self.wheel.chosen.connect(self._chosen)
         self.wheel.cancelled.connect(self.close)
         self.wheel.popup_at(pos)
@@ -276,6 +283,7 @@ class CerclicApp(QObject):
         self._reads = 0
         self.hotkey = None
         self.hotkey_ok = None
+        self._hotkey_paused = False
 
         self.bridge = Bridge()
         self.bridge.hotkey.connect(self._on_hotkey, Qt.QueuedConnection)
@@ -306,8 +314,7 @@ class CerclicApp(QObject):
         self.tray = QSystemTrayIcon(make_icon(), self.qapp)
         self.tray.setToolTip(f"{APP_NAME} {__version__}")
         menu = QMenu()
-        menu.addAction("Comment ça marche ?", lambda: self.show_help(False))
-        menu.addAction("Paramètres", self.open_settings)
+        menu.addAction("Ouvrir Cerclic", self.open_settings)
         menu.addSeparator()
         menu.addAction("Quitter Cerclic", self.quit)
         self.tray.setContextMenu(menu)
@@ -316,13 +323,16 @@ class CerclicApp(QObject):
         self._menu = menu
 
     def _tray_activated(self, reason) -> None:
-        if reason == QSystemTrayIcon.DoubleClick:
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             self.open_settings()
-        elif reason == QSystemTrayIcon.Trigger:
-            self.show_help(False)
 
     # -- integration -------------------------------------------------------------------
     def apply_integration(self) -> None:
+        """Right-click entry, start with Windows and the shortcut, as set."""
+        self._apply_shell()
+        self._apply_hotkey()
+
+    def _apply_shell(self) -> None:
         if os.environ.get("CERCLIC_NO_INTEGRATION"):   # tests: leave Windows alone
             return
         if os.name == "nt":
@@ -331,7 +341,7 @@ class CerclicApp(QObject):
                 if self.settings.get("context_menu"):
                     if not shell.context_menu_ok():
                         shell.install_context_menu()
-                        log("entrée « Cerclic » ajoutée au clic droit")
+                        log("entrée « Cerclic » ajoutée au clic droit")
                 else:
                     shell.remove_context_menu()
             except Exception:
@@ -340,26 +350,51 @@ class CerclicApp(QObject):
                 shell.set_autostart(bool(self.settings.get("autostart")))
             except Exception:
                 log_exception("démarrage avec Windows : échec")
-        self._apply_hotkey()
 
-    def _apply_hotkey(self) -> None:
-        want = bool(self.settings.get("hotkey")) and os.name == "nt"
+    def hotkey_combo(self) -> tuple[int, int]:
+        return int(self.settings.get("hotkey_mods")), int(self.settings.get("hotkey_vk"))
+
+    def hotkey_label(self) -> str:
+        from .win.hotkey import label
+        return label(*self.hotkey_combo())
+
+    def _apply_hotkey(self, restart: bool = False) -> None:
+        """Register the shortcut as set (again if `restart`), or remove it."""
+        want = (bool(self.settings.get("hotkey")) and os.name == "nt"
+                and not self._hotkey_paused
+                and not os.environ.get("CERCLIC_NO_INTEGRATION"))
+        mods, vk = self.hotkey_combo()
+        if self.hotkey is not None and (not want or restart
+                                        or (self.hotkey.mods, self.hotkey.vk) != (mods, vk)):
+            self.hotkey.stop()
+            self.hotkey = None
+            self.hotkey_ok = None
         if want and self.hotkey is None:
             from .win.hotkey import Hotkey
             self.hotkey = Hotkey(on_hotkey=self.bridge.hotkey.emit,
-                                 on_status=self.bridge.hotkey_status.emit)
+                                 on_status=self.bridge.hotkey_status.emit,
+                                 mods=mods, vk=vk)
             self.hotkey.start()
-        elif not want and self.hotkey is not None:
-            self.hotkey.stop()
-            self.hotkey = None
+
+    def _pause_hotkey(self, paused: bool) -> None:
+        """While a new shortcut is being recorded, the current one is released
+        (otherwise Windows would swallow it before the settings window sees it)."""
+        self._hotkey_paused = paused
+        self._apply_hotkey()
 
     def _on_hotkey_status(self, ok: bool) -> None:
+        if self.hotkey is None:
+            return                      # an older registration, already replaced
         self.hotkey_ok = ok
-        if not ok:
-            from .win.hotkey import LABEL
-            self.message(f"Raccourci {LABEL} indisponible",
-                         "Une autre application l'utilise déjà. Le clic droit "
-                         "« Cerclic » marche toujours.", kind="warn")
+        win = self._settings_window()
+        if win is not None:
+            win.set_hotkey_status(ok)
+        elif not ok:
+            self.message(f"Raccourci {self.hotkey_label()} indisponible",
+                         "Une autre application l'utilise déjà. Choisis-en un autre "
+                         "dans Cerclic ; le clic droit « Cerclic » marche toujours.",
+                         kind="warn", buttons=[("Plus tard", None),
+                                               ("Choisir", self.open_settings)])
 
     # -- requests ------------------------------------------------------------------------
     def handle_request(self, cmd: str, paths: list) -> None:
@@ -367,9 +402,7 @@ class CerclicApp(QObject):
         try:
             if cmd == "open":
                 self.open_wheel(paths, source="menu")
-            elif cmd == "hello":
-                self.show_help(True)
-            elif cmd == "settings":
+            elif cmd in ("hello", "settings"):
                 self.open_settings()
             elif cmd == "quit":
                 self.quit()
@@ -420,13 +453,14 @@ class CerclicApp(QObject):
                              "téléphone…). Copie-le dans un dossier, puis réessaie.")
             elif paths:
                 self.message("Aucune action pour ce type de fichier",
-                             "Cerclic travaille sur les images, les PDF et les vidéos.")
+                             "Cerclic travaille sur les images, les PDF, les vidéos "
+                             "et les sons.")
             else:
-                from .win.hotkey import LABEL
                 self.message("Sélectionne d'abord un fichier",
-                             f"Clique sur une image, un PDF ou une vidéo dans "
-                             f"l'Explorateur ou sur le Bureau, puis appuie sur {LABEL}. "
-                             "Ou fais un clic droit sur le fichier, puis « Cerclic ».")
+                             "Clique sur une image, un PDF, une vidéo ou un son dans "
+                             "l'Explorateur ou sur le Bureau, puis appuie sur "
+                             f"{self.hotkey_label()}. Ou fais un clic droit sur le "
+                             "fichier, puis « Cerclic ».")
             return
         if self.session is not None:
             self.session.close()
@@ -443,7 +477,28 @@ class CerclicApp(QObject):
                 "jpg_quality": int(self.settings.get("jpg_quality"))}
         opts.update(choice_opts)
         log(f"action {action_id} sur {len(files)} fichier(s)")
+        if action.ui == "clipboard":
+            self._copy_image(files[0])
+            return
         self._drive(self._flow(action, files, opts, pos))
+
+    def _copy_image(self, path: str) -> None:
+        """Put the picture on the clipboard (decoded in the background)."""
+        from .actions import images
+        from .ui.editor_base import Loader, qimage_from_pil
+        if getattr(self, "_clip_loader", None) is None:
+            self._clip_loader = Loader(self)
+            self._clip_loader.done.connect(self._copied)
+        self._clip_loader.run(lambda: qimage_from_pil(images.clipboard_image(path)))
+
+    def _copied(self, img, err) -> None:
+        if err or img is None or img.isNull():
+            self.message("Copie impossible", err or "Image illisible.", kind="error")
+            return
+        QApplication.clipboard().setImage(img)
+        log("image copiée dans le presse-papiers")
+        self.message("Image copiée", "Colle-la où tu veux avec Ctrl + V.", kind="ok",
+                     auto_ms=3500)
 
     def _drive(self, gen, value=None) -> None:
         """Run a flow: each `yield ask` shows a window and resumes with its answer."""
@@ -481,7 +536,7 @@ class CerclicApp(QObject):
             if need == "crop":
                 from .ui.crop_editor import CropEditor
                 res = yield self._ask_editor(
-                    lambda: CropEditor(files[0], opts.get("password")))
+                    lambda: CropEditor(files[0], opts.get("password")), pos)
                 if res is None:
                     return
                 opts.update(res)
@@ -489,7 +544,7 @@ class CerclicApp(QObject):
                 sig = self.settings.get("signature")
                 if not sig or not os.path.exists(sig):
                     from .ui.signature import SignaturePad
-                    res = yield self._ask_editor(SignaturePad)
+                    res = yield self._ask_editor(SignaturePad, pos)
                     if res is None:
                         return
                     sig = res["signature"]
@@ -497,12 +552,25 @@ class CerclicApp(QObject):
                     self.settings.save()
                 from .ui.signature import SignPlacer
                 res = yield self._ask_editor(
-                    lambda: SignPlacer(files[0], sig, opts.get("password")))
+                    lambda: SignPlacer(files[0], sig, opts.get("password")), pos)
                 if res is None:
                     return
                 if res["signature"] != self.settings.get("signature"):
                     self.settings.set("signature", res["signature"])
                     self.settings.save()
+                opts.update(res)
+            elif need == "pages":
+                from .ui.pages_editor import PagesEditor
+                res = yield self._ask_editor(
+                    lambda: PagesEditor(files[0], opts.get("password")), pos)
+                if res is None:
+                    return
+                opts.update(res)
+            elif need == "trim":
+                from .ui.trim_editor import TrimEditor
+                res = yield self._ask_editor(lambda: TrimEditor(files[0]), pos)
+                if res is None:
+                    return
                 opts.update(res)
             elif need == "text":
                 txt = yield self._ask_text("Texte du filigrane",
@@ -542,7 +610,7 @@ class CerclicApp(QObject):
             bubble.popup_at(pos)
         return ask
 
-    def _ask_editor(self, factory):
+    def _ask_editor(self, factory, pos=None):
         def ask(cb):
             editor = factory()
             state = {"done": False}
@@ -557,7 +625,7 @@ class CerclicApp(QObject):
             editor.accepted.connect(finish)
             editor.cancelled.connect(lambda: finish(None))
             self._live.add(editor)
-            editor.start()
+            editor.start(pos if pos is not None else QCursor.pos())
         return ask
 
     # -- jobs -----------------------------------------------------------------------------------
@@ -575,6 +643,7 @@ class CerclicApp(QObject):
         def on_done(result):
             job.finished = True
             self._live.discard(job)
+            QTimer.singleShot(0, _gc_now)
             log(f"résultat {result.action_id} : "
                 + (f"ok, {len(result.outputs)} fichier(s) en {result.seconds:.1f} s"
                    if result.ok else f"{'annulé' if result.cancelled else 'échec'} : "
@@ -616,20 +685,6 @@ class CerclicApp(QObject):
         from .ui.cards import MessageCard
         self.cards.add(MessageCard(title, text, kind, buttons, auto_ms))
 
-    def show_help(self, already_running: bool) -> None:
-        from .win.hotkey import LABEL
-        title = "Cerclic est déjà lancé" if already_running else "Cerclic est prêt"
-        text = ("Clic droit sur une image, un PDF ou une vidéo, puis « Cerclic ». "
-                f"Ou sélectionne des fichiers et appuie sur {LABEL}.")
-        buttons = None
-        if os.name == "nt":
-            from .win import shell
-            if shell.is_windows_11() and not shell.classic_menu_enabled():
-                text += (" Sous Windows 11, l'entrée est dans « Afficher d'autres "
-                         "options » (ou Maj + clic droit).")
-                buttons = [("Plus tard", None), ("Cerclic en un clic", self.enable_classic_menu)]
-        self.message(title, text, buttons=buttons, auto_ms=14000)
-
     def enable_classic_menu(self) -> None:
         from .win import shell
         try:
@@ -647,6 +702,21 @@ class CerclicApp(QObject):
                               ("Redémarrer l'Explorateur", self._restart_explorer)],
                      auto_ms=20000)
 
+    def disable_classic_menu(self) -> None:
+        from .win import shell
+        try:
+            shell.set_classic_menu(False)
+        except Exception:
+            log_exception("menu classique")
+        self.settings.set("classic_menu", False)
+        self.settings.set("classic_menu_by_cerclic", False)
+        self.settings.save()
+        self.message("Menu de Windows 11 rétabli",
+                     "Il s'applique au redémarrage de l'Explorateur.",
+                     buttons=[("Plus tard", None),
+                              ("Redémarrer l'Explorateur", self._restart_explorer)],
+                     auto_ms=20000)
+
     def _restart_explorer(self) -> None:
         from .win import shell
         try:
@@ -654,34 +724,72 @@ class CerclicApp(QObject):
         except Exception:
             log_exception("redémarrage de l'Explorateur")
 
-    def open_settings(self) -> None:
-        if self._settings_win is not None:
-            try:
-                self._settings_win.show()
-                self._settings_win.raise_()
-                self._settings_win.activateWindow()
-                return
-            except RuntimeError:
-                self._settings_win = None
+    # -- Cerclic's window (settings) -------------------------------------------------------
+    def _settings_window(self):
+        if self._settings_win is None:
+            return None
+        try:
+            self._settings_win.isVisible()
+            return self._settings_win
+        except RuntimeError:
+            self._settings_win = None
+            return None
+
+    def open_settings(self, welcome: bool = False) -> None:
+        win = self._settings_window()
+        if win is not None:
+            if win.isMinimized():
+                win.showNormal()
+            win.show()
+            win.raise_()
+            win.activateWindow()
+            return
         from .ui.settings_window import SettingsWindow
-        from .win.hotkey import LABEL
-        win11 = False
+        win11 = classic = False
         if os.name == "nt":
             from .win import shell
             win11 = shell.is_windows_11()
-        win = SettingsWindow(self.settings, windows_11=win11, hotkey_label=LABEL)
-        win.saved.connect(lambda: self._settings_saved(win))
+            classic = win11 and shell.classic_menu_enabled()
+        win = SettingsWindow(self.settings, windows_11=win11, welcome=welcome,
+                             classic_enabled=classic)
+        win.changed.connect(lambda key: self._setting_changed(win, key))
+        win.capturing.connect(self._pause_hotkey)
         win.draw_signature.connect(lambda: self._draw_signature(win))
+        win.quit_requested.connect(self.quit)
         win.destroyed.connect(lambda *_: setattr(self, "_settings_win", None))
         self._settings_win = win
-        win.show()
-        win.raise_()
-        win.activateWindow()
+        win.set_hotkey_status(self.hotkey_ok if self.hotkey is not None else None)
+        win.show_centered(QCursor.pos())
+
+    def _setting_changed(self, win, key: str) -> None:
+        if key in ("context_menu", "autostart"):
+            self._apply_shell()
+        elif key == "hotkey":
+            self._apply_hotkey()
+            try:
+                win.set_hotkey_status(self.hotkey_ok if self.hotkey is not None else None)
+            except RuntimeError:
+                pass
+        elif key == "hotkey_combo":
+            self._hotkey_paused = False
+            self._apply_hotkey(restart=True)
+        elif key == "classic_menu" and os.name == "nt":
+            from .win import shell
+            choice = win.classic_choice()
+            if choice is not None and choice != shell.classic_menu_enabled():
+                if choice:
+                    self.enable_classic_menu()
+                else:
+                    self.disable_classic_menu()
 
     def _draw_signature(self, win) -> None:
         def flow():
             from .ui.signature import SignaturePad
-            res = yield self._ask_editor(SignaturePad)
+            try:
+                anchor = win.geometry().center()
+            except RuntimeError:
+                anchor = QCursor.pos()
+            res = yield self._ask_editor(SignaturePad, anchor)
             if res:
                 self.settings.set("signature", res["signature"])
                 self.settings.save()
@@ -691,32 +799,13 @@ class CerclicApp(QObject):
                     pass
         self._drive(flow())
 
-    def _settings_saved(self, win) -> None:
-        self.apply_integration()
-        choice = win.classic_choice()
-        if choice is not None and os.name == "nt":
-            from .win import shell
-            if choice != shell.classic_menu_enabled():
-                if choice:
-                    self.enable_classic_menu()
-                else:
-                    try:
-                        shell.set_classic_menu(False)
-                    except Exception:
-                        log_exception("menu classique")
-                    self.settings.set("classic_menu", False)
-                    self.settings.set("classic_menu_by_cerclic", False)
-                    self.settings.save()
-                    self.message("Menu de Windows 11 rétabli",
-                                 "Il s'applique au redémarrage de l'Explorateur.",
-                                 buttons=[("Plus tard", None),
-                                          ("Redémarrer l'Explorateur",
-                                           self._restart_explorer)], auto_ms=20000)
-
     def quit(self) -> None:
         log("arrêt de Cerclic")
         if self.hotkey is not None:
             self.hotkey.stop()
+        win = self._settings_window()
+        if win is not None:
+            win.close()
         if self.session is not None:
             self.session.close()
         running = [j for j in self._live if isinstance(j, Job)]
@@ -752,6 +841,19 @@ def _install_crash_logging() -> None:
     threading.excepthook = thread_hook
 
 
+def _collect_on_gui_thread(qapp) -> QTimer:
+    """Python's cycle collector may run in whatever thread happens to allocate,
+    and destroying a Qt window outside the interface thread crashes. So
+    automatic collection is off, and the interface thread collects regularly
+    (reference counting still frees almost everything at once)."""
+    import gc
+    gc.disable()
+    timer = QTimer(qapp, interval=20_000)
+    timer.timeout.connect(lambda: gc.collect())
+    timer.start()
+    return timer
+
+
 def run_resident(cmd: str, paths: list[str], lock) -> int:
     """Start the resident Cerclic, then perform the request that started it."""
     _install_crash_logging()
@@ -762,6 +864,7 @@ def run_resident(cmd: str, paths: list[str], lock) -> int:
     qapp.setApplicationVersion(__version__)
     from .ui.theme import apply_app_theme
     apply_app_theme(qapp)
+    _gc_timer = _collect_on_gui_thread(qapp)  # noqa: F841 (lives with qapp)
     log(f"démarrage de Cerclic {__version__} (journal : {log_path()})")
     if not QSystemTrayIcon.isSystemTrayAvailable():
         log("zone de notification indisponible au démarrage, nouvel essai")
@@ -773,17 +876,14 @@ def run_resident(cmd: str, paths: list[str], lock) -> int:
     app._lock = lock  # held for the life of the process
 
     def first_request():
-        if not app.settings.get("welcome_shown"):
+        first = not app.settings.get("welcome_shown")
+        if first:
             app.settings.set("welcome_shown", True)
             app.settings.save()
-            if cmd != "open":
-                app.show_help(False)
-        elif cmd == "hello":
-            app.show_help(False)
         if cmd == "open":
             app.open_wheel(paths, source="menu")
-        elif cmd == "settings":
-            app.open_settings()
+        elif cmd in ("hello", "settings") or first:
+            app.open_settings(welcome=first)
 
     QTimer.singleShot(0, first_request)
     return qapp.exec()

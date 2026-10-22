@@ -254,6 +254,68 @@ def split_pdf(src: str, every: int = 1, password: str | None = None,
     return written
 
 
+# ----- pages: reorder, rotate, remove, extract -------------------------------------
+
+def arrange_pdf(src: str, order: Sequence, password: str | None = None,
+                tag: str = "organized") -> str:
+    """New PDF made of the pages listed in `order`, in that order: each item is
+    a page index, or (page index, extra clockwise rotation in degrees).
+    Pages left out are removed; links and bookmarks to them go away."""
+    items = []
+    for it in order:
+        idx, rot = (it, 0) if isinstance(it, int) else (int(it[0]), int(it[1]))
+        items.append((idx, rot % 360))
+    if not items:
+        raise UserError("Aucune page à garder.")
+    with open_pdf(src, password) as doc:
+        n = doc.page_count
+        if any(not 0 <= idx < n for idx, _ in items):
+            raise UserError("Page introuvable dans ce PDF.")
+        if [idx for idx, _ in items] == list(range(n)) and not any(r for _, r in items):
+            raise NothingToDo("Les pages n'ont pas changé.")
+        out = output_for(src, tag, new_ext=".pdf")
+        doc.select([idx for idx, _ in items])
+        for page, (_, rot) in zip(doc, items):
+            if rot:
+                page.set_rotation((page.rotation + rot) % 360)
+        _save(doc, out, garbage=3, deflate=True)
+    return out
+
+
+def pdf_to_text(src: str, password: str | None = None, ctx=None) -> str:
+    """The text of the PDF in a .txt file (opens in Notepad, accents included)."""
+    with open_pdf(src, password) as doc:
+        n = doc.page_count
+        pages = []
+        for i, page in enumerate(doc):
+            check(ctx)
+            progress(ctx, i / max(1, n), f"Page {i + 1} sur {n}")
+            pages.append(page.get_text("text", sort=True).strip())
+    if not any(pages):
+        raise NothingToDo("Aucun texte dans ce PDF : c'est sûrement un scan (une image).")
+    out = output_for(src, "text", new_ext=".txt")
+    text = "\n\n".join(p for p in pages)
+    with open(out, "w", encoding="utf-8-sig", newline="\r\n") as f:
+        f.write(text + "\n")
+    return out
+
+
+def render_thumbs(src: str, height: int, password: str | None = None, report=None,
+                  should_stop=None) -> int:
+    """Render every page `height` px high, one after the other; report(index,
+    (rgb, w, h, stride)) for each. Returns the page count."""
+    with open_pdf(src, password) as doc:
+        n = doc.page_count
+        for i, page in enumerate(doc):
+            if should_stop is not None and should_stop():
+                break
+            zoom = max(0.02, height / max(1.0, page.rect.height))
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
+            if report is not None:
+                report(i, (bytes(pix.samples), pix.width, pix.height, pix.stride))
+        return n
+
+
 # ----- shrink / rotate / crop ---------------------------------------------------
 
 _PRINT_COLOURS = ("CMYK", "DeviceN", "Separation", "/Lab", "ICC N 4")

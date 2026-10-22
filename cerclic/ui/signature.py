@@ -1,4 +1,5 @@
 """Signature: draw it once (or import a photo of it), then place it on the page.
+Both are compact popups that open where the wheel was.
 
 SignaturePad   draw with the mouse; saved as a transparent PNG for next time.
 SignPlacer     the PDF page with the signature on it: drag to move, drag a
@@ -8,17 +9,18 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QFileDialog, QLabel, QPushButton, QWidget
 
 from ..settings import config_dir
-from .editor_base import EditorWindow, Loader
+from .editor_base import EditorWindow, Loader, fit_view
 from .theme import MUTED, font
 
 INK = QColor(16, 32, 74)
 PEN_W = 3.0
 HANDLE = 12
+PLACE_MARGIN = 10   # px around the page (room for the handles)
 
 
 def signature_path() -> str:
@@ -80,14 +82,12 @@ class _Pad(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setMinimumSize(520, 220)
+        self.setFixedSize(470, 190)
         self.setCursor(Qt.CrossCursor)
         self.strokes: list[list[QPointF]] = []
 
     def area(self) -> QRectF:
-        w = min(self.width() - 80, 900)
-        h = min(self.height() - 60, w * 0.38)
-        return QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
+        return QRectF(self.rect()).adjusted(2, 2, -2, -2)
 
     def clear(self) -> None:
         self.strokes = []
@@ -182,25 +182,28 @@ class SignaturePad(EditorWindow):
     """accepted({"signature": path})"""
 
     def __init__(self):
-        super().__init__("Ta signature", "Elle sera gardée pour les prochaines fois · "
-                                         "Entrée pour enregistrer · Échap pour annuler")
+        super().__init__("Ta signature", "Gardée pour les prochaines fois")
         self.pad = _Pad()
         self.pad.changed.connect(self._sync)
-        self.center.addWidget(self.pad, 1)
-        imp = QPushButton("Importer une image…")
+        self.center.addWidget(self.pad, 0, Qt.AlignCenter)
+        imp = QPushButton("Importer…")
         imp.setObjectName("ghost")
         imp.setToolTip("Une photo de ta signature sur papier blanc")
+        imp.setFocusPolicy(Qt.NoFocus)
         imp.clicked.connect(self._import)
         clear = QPushButton("Effacer")
         clear.setObjectName("ghost")
+        clear.setFocusPolicy(Qt.NoFocus)
         clear.clicked.connect(self.pad.clear)
         self.msg = QLabel("")
         self.msg.setObjectName("hint")
         cancel = QPushButton("Annuler")
         cancel.setObjectName("ghost")
+        cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
         self.ok = QPushButton("Enregistrer")
         self.ok.setObjectName("primary")
+        self.ok.setFocusPolicy(Qt.NoFocus)
         self.ok.clicked.connect(self.validate)
         for w in (imp, clear, self.msg):
             self.bar.addWidget(w)
@@ -209,17 +212,22 @@ class SignaturePad(EditorWindow):
         self.bar.addWidget(self.ok)
         self._sync()
 
-    def start(self) -> None:
-        self.open_on_cursor_screen()
+    def start(self, anchor=None) -> None:
+        self.open_at(anchor)
 
     def _sync(self) -> None:
         self.ok.setEnabled(bool(self.pad.strokes))
 
     def _import(self) -> None:
-        src, _ = QFileDialog.getOpenFileName(
-            self, "Choisir une image de ta signature", "",
-            "Images (*.png *.jpg *.jpeg *.webp *.heic *.bmp)")
+        self.pause_dismiss(True)
+        try:
+            src, _ = QFileDialog.getOpenFileName(
+                self, "Choisir une image de ta signature", "",
+                "Images (*.png *.jpg *.jpeg *.webp *.heic *.bmp)")
+        finally:
+            self.pause_dismiss(False)
         if not src:
+            self.activateWindow()
             return
         try:
             path = import_signature(src, signature_path())
@@ -253,7 +261,7 @@ class _PlaceCanvas(QWidget):
 
     def _view(self) -> QRectF:
         W, H = self.page_size
-        m = 36
+        m = PLACE_MARGIN
         aw, ah = max(1.0, self.width() - 2 * m), max(1.0, self.height() - 2 * m)
         s = min(aw / W, ah / H)
         return QRectF((self.width() - W * s) / 2, (self.height() - H * s) / 2, W * s, H * s)
@@ -383,30 +391,32 @@ class SignPlacer(EditorWindow):
 
     def __init__(self, pdf_path: str, signature: str, password: str | None = None):
         super().__init__(os.path.basename(pdf_path),
-                         "Glisse la signature où tu veux, tire un coin pour la "
-                         "redimensionner · Entrée pour signer")
+                         "Glisse la signature · tire un coin · Entrée pour signer")
         self.path, self.signature, self.password = pdf_path, signature, password
         self.canvas = _PlaceCanvas()
         self.canvas.double_clicked.connect(self.validate)
-        self.center.addWidget(self.canvas, 1)
+        self.center.addWidget(self.canvas, 0, Qt.AlignCenter)
         self._load_signature()
 
-        change = QPushButton("Changer de signature")
+        change = QPushButton("Changer")
         change.setObjectName("ghost")
+        change.setToolTip("Dessiner ou importer une autre signature")
+        change.setFocusPolicy(Qt.NoFocus)
         change.clicked.connect(self._change_signature)
-        self.prev_btn = QPushButton("‹")
-        self.prev_btn.setFixedWidth(40)
+        self.prev_btn = self.chip("‹", checkable=False)
         self.prev_btn.clicked.connect(lambda: self._goto(self.page - 1))
         self.page_label = QLabel("")
-        self.next_btn = QPushButton("›")
-        self.next_btn.setFixedWidth(40)
+        self.page_label.setObjectName("hint")
+        self.next_btn = self.chip("›", checkable=False)
         self.next_btn.clicked.connect(lambda: self._goto(self.page + 1))
         cancel = QPushButton("Annuler")
         cancel.setObjectName("ghost")
+        cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
         self.ok = QPushButton("Signer")
         self.ok.setObjectName("primary")
         self.ok.setEnabled(False)
+        self.ok.setFocusPolicy(Qt.NoFocus)
         self.ok.clicked.connect(self.validate)
         self.bar.addWidget(change)
         self.bar.addStretch(1)
@@ -424,8 +434,18 @@ class SignPlacer(EditorWindow):
         self._loader.done.connect(self._loaded)
         self._pad = None
 
-    def start(self) -> None:
-        self.open_on_cursor_screen()
+    def start(self, anchor=None) -> None:
+        if anchor is not None:
+            self.anchor = anchor
+        from .crop_editor import probe_size
+        w, h, count, index = probe_size(self.path, -1, self.password)
+        self.page, self.page_count = index, count
+        room_w, room_h = self.room(520, 580)
+        vw, vh = fit_view(w, h, room_w - 2 * PLACE_MARGIN, room_h - 2 * PLACE_MARGIN,
+                          min_side=320, max_scale=1.6)
+        self.canvas.setFixedSize(QSize(vw + 2 * PLACE_MARGIN, vh + 2 * PLACE_MARGIN))
+        self._update_nav()
+        self.open_at()
         self._load()
 
     def _load_signature(self) -> None:
@@ -437,14 +457,14 @@ class SignPlacer(EditorWindow):
         self._token += 1
         token = self._token
         dpr = self.devicePixelRatioF() or 1.0
-        w = max(400, int((self.width() - 72) * dpr))
-        h = max(300, int((self.height() - 180) * dpr))
+        w = max(64, int((self.canvas.width() - 2 * PLACE_MARGIN) * dpr))
+        h = max(64, int((self.canvas.height() - 2 * PLACE_MARGIN) * dpr))
         index = self.page if self.page >= 0 else 10 ** 6
+        path, pw = self.path, self.password
         self.canvas.page_img = None
         self.canvas.message = "Chargement…"
         self.canvas.update()
-        self._loader.run(lambda: (token, load_pdf_preview(self.path, index, w, h,
-                                                          self.password)))
+        self._loader.run(lambda: (token, load_pdf_preview(path, index, w, h, pw)))
 
     def _loaded(self, res, err) -> None:
         if err:
@@ -464,11 +484,18 @@ class SignPlacer(EditorWindow):
                                                    self.canvas.sig_img.height())
             self.canvas.box = QRectF(x0, y0, x1 - x0, y1 - y0)
             self._placed = True
-        self.page_label.setText(f"Page {index + 1} / {count}")
-        self.prev_btn.setEnabled(index > 0)
-        self.next_btn.setEnabled(index < count - 1)
+        self._update_nav()
         self.ok.setEnabled(self.canvas.sig_img is not None)
         self.canvas.update()
+
+    def _update_nav(self) -> None:
+        index = self.page if self.page >= 0 else self.page_count - 1
+        self.page_label.setText(f"Page {index + 1} / {self.page_count}")
+        self.prev_btn.setEnabled(index > 0)
+        self.next_btn.setEnabled(index < self.page_count - 1)
+        many = self.page_count > 1
+        for w in (self.prev_btn, self.page_label, self.next_btn):
+            w.setVisible(many)
 
     def _goto(self, index: int) -> None:
         if 0 <= index < self.page_count and index != self.page:
@@ -476,12 +503,13 @@ class SignPlacer(EditorWindow):
             self._load()
 
     def _change_signature(self) -> None:
+        self.pause_dismiss(True)
         self.hide()
         pad = SignaturePad()
         self._pad = pad
         pad.accepted.connect(self._new_signature)
         pad.cancelled.connect(self._back_from_pad)
-        pad.start()
+        pad.start(self.anchor)
 
     def _new_signature(self, result: dict) -> None:
         self.signature = result["signature"]
@@ -497,9 +525,15 @@ class SignPlacer(EditorWindow):
 
     def _back_from_pad(self, *_):
         self._pad = None
+        if self._done:
+            return
         self.ok.setEnabled(self.canvas.sig_img is not None)
         self.show()
+        self.raise_()
         self.activateWindow()
+        from ..win.foreground import bring_to_front
+        bring_to_front(int(self.winId()))
+        self.pause_dismiss(False)
         self.canvas.update()
 
     def validate(self) -> None:

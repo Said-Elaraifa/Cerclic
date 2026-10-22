@@ -1,8 +1,11 @@
-"""System-wide keyboard shortcut (Ctrl+Alt+Space) through RegisterHotKey.
+"""System-wide keyboard shortcut that opens the wheel, through RegisterHotKey.
 
-Windows delivers WM_HOTKEY only for this exact key combination; nothing else
-typed on the keyboard reaches Cerclic. The registration lives on a small thread
-with its own message loop; `on_hotkey()` is called from that thread.
+Windows delivers WM_HOTKEY only for the one combination Cerclic registered;
+nothing else typed on the keyboard reaches Cerclic. The registration lives on
+a small thread with its own message loop; `on_hotkey()` is called from it.
+
+The combination is chosen in the settings (default Ctrl+Alt+Espace): `check()`
+refuses the ones that would get in the way of typing or of Windows itself.
 """
 from __future__ import annotations
 
@@ -13,11 +16,95 @@ from typing import Callable
 
 from ..log import log
 
-MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x0001, 0x0002, 0x4000
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
 VK_SPACE = 0x20
 WM_HOTKEY, WM_QUIT = 0x0312, 0x0012
 HOTKEY_ID = 0xC3C1
-LABEL = "Ctrl+Alt+Espace"
+
+DEFAULT_MODS = MOD_CONTROL | MOD_ALT
+DEFAULT_VK = VK_SPACE
+
+_KEY_NAMES = {
+    0x20: "Espace", 0x09: "Tab", 0x0D: "Entrée", 0x08: "Retour", 0x2D: "Inser",
+    0x2E: "Suppr", 0x24: "Origine", 0x23: "Fin", 0x21: "Page préc.", 0x22: "Page suiv.",
+    0x25: "←", 0x26: "↑", 0x27: "→", 0x28: "↓", 0x13: "Pause", 0x2C: "Impr. écran",
+    0x6A: "Pavé *", 0x6B: "Pavé +", 0x6D: "Pavé -", 0x6E: "Pavé .", 0x6F: "Pavé /",
+}
+# Punctuation keys depend on the keyboard layout: asked to Windows, else AZERTY.
+_AZERTY = {0xBA: "$", 0xBB: "=", 0xBC: ",", 0xBD: "-", 0xBE: ";", 0xBF: ":",
+           0xC0: "ù", 0xDB: ")", 0xDC: "*", 0xDD: "^", 0xDE: "²", 0xDF: "!", 0xE2: "<"}
+_RESERVED = {
+    (MOD_ALT, 0x73): "Alt + F4 ferme les fenêtres.",
+    (MOD_ALT, 0x09): "Alt + Tab change de fenêtre.",
+    (MOD_ALT, 0x1B): "Alt + Échap change de fenêtre.",
+    (MOD_ALT, 0x20): "Alt + Espace ouvre le menu des fenêtres.",
+    (MOD_CONTROL, 0x1B): "Ctrl + Échap ouvre le menu Démarrer.",
+    (MOD_CONTROL | MOD_ALT, 0x2E): "Ctrl + Alt + Suppr est réservé à Windows.",
+    (MOD_CONTROL | MOD_SHIFT, 0x1B): "Ctrl + Maj + Échap ouvre le Gestionnaire des tâches.",
+}
+_EVERYDAY = set(b"ACVXZYSFPNOWTR")   # Ctrl + these letters: copy, paste, save...
+_ALTGR_LETTERS = set(b"EQM")          # AltGr (= Ctrl + Alt) types €, @, µ with them
+
+
+def _layout_char(vk: int) -> str:
+    try:
+        code = ctypes.windll.user32.MapVirtualKeyW(vk, 2) & 0x7FFFFFFF  # VK_TO_CHAR
+        return chr(code).upper() if 32 < code < 0x110000 else ""
+    except Exception:
+        return ""
+
+
+def key_name(vk: int) -> str:
+    if 0x41 <= vk <= 0x5A or 0x30 <= vk <= 0x39:
+        return chr(vk)
+    if 0x70 <= vk <= 0x87:
+        return f"F{vk - 0x6F}"
+    if 0x60 <= vk <= 0x69:
+        return f"Pavé {vk - 0x60}"
+    if vk in _KEY_NAMES:
+        return _KEY_NAMES[vk]
+    if 0xBA <= vk <= 0xE2:
+        return _layout_char(vk) or _AZERTY.get(vk, f"Touche {vk}")
+    return f"Touche {vk}"
+
+
+def label(mods: int, vk: int) -> str:
+    """'Ctrl + Alt + Espace'"""
+    parts = []
+    if mods & MOD_CONTROL:
+        parts.append("Ctrl")
+    if mods & MOD_ALT:
+        parts.append("Alt")
+    if mods & MOD_SHIFT:
+        parts.append("Maj")
+    if mods & MOD_WIN:
+        parts.append("Win")
+    parts.append(key_name(vk))
+    return " + ".join(parts)
+
+
+def check(mods: int, vk: int) -> str | None:
+    """Why this combination should not be used, or None if it is fine."""
+    mods &= MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_WIN
+    if not vk or vk in (0x10, 0x11, 0x12, 0x5B, 0x5C):
+        return "Ajoute une touche après Ctrl, Alt, Maj ou Win."
+    if (mods, vk) in _RESERVED:
+        return _RESERVED[(mods, vk)]
+    is_f_key = 0x70 <= vk <= 0x87
+    if is_f_key and not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) and (
+            vk <= 0x75 or 0x79 <= vk <= 0x7B):
+        return (f"{key_name(vk)} sert déjà dans Windows (aide, renommer, actualiser, "
+                "plein écran…). Ajoute Ctrl, Alt ou Win, ou prends F7, F8, F9.")
+    if not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) and not is_f_key:
+        return ("Il faut Ctrl, Alt ou Win dans la combinaison (sinon cette touche "
+                "ne s'écrirait plus).")
+    if mods == MOD_CONTROL and vk in _EVERYDAY:
+        return f"Ctrl + {chr(vk)} sert déjà partout (copier, coller, enregistrer…)."
+    if mods == MOD_CONTROL | MOD_ALT and (0x30 <= vk <= 0x39 or vk >= 0xBA
+                                          or vk in _ALTGR_LETTERS):
+        return ("Cette combinaison sert à taper des caractères (@, €, #…) avec "
+                "AltGr. Choisis-en une autre.")
+    return None
 
 
 class _MSG(ctypes.Structure):
@@ -29,12 +116,19 @@ class _MSG(ctypes.Structure):
 
 class Hotkey:
     def __init__(self, on_hotkey: Callable[[], None],
-                 on_status: Callable[[bool], None] | None = None):
+                 on_status: Callable[[bool], None] | None = None,
+                 mods: int = DEFAULT_MODS, vk: int = DEFAULT_VK):
         self.on_hotkey = on_hotkey
         self.on_status = on_status or (lambda ok: None)
+        self.mods, self.vk = int(mods), int(vk)
+        self.ok: bool | None = None
         self._thread: threading.Thread | None = None
         self._tid = 0
         self._ready = threading.Event()
+
+    @property
+    def label(self) -> str:
+        return label(self.mods, self.vk)
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="cerclic-hotkey",
@@ -58,9 +152,11 @@ class Hotkey:
         user32.GetMessageW.argtypes = [ctypes.POINTER(_MSG), wintypes.HWND,
                                        wintypes.UINT, wintypes.UINT]
         self._tid = ctypes.windll.kernel32.GetCurrentThreadId()
-        ok = bool(user32.RegisterHotKey(None, HOTKEY_ID,
-                                        MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_SPACE))
-        log(f"raccourci {LABEL} : {'actif' if ok else 'déjà pris par une autre application'}")
+        ok = bool(user32.RegisterHotKey(None, HOTKEY_ID, self.mods | MOD_NOREPEAT,
+                                        self.vk))
+        self.ok = ok
+        log(f"raccourci {self.label} : "
+            f"{'actif' if ok else 'déjà pris par une autre application'}")
         self._ready.set()
         self.on_status(ok)
         if not ok:

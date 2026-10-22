@@ -58,8 +58,10 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".jfif", ".webp", ".bmp", ".gif", ".tif",
 PDF_EXTS = {".pdf"}
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv", ".flv",
               ".3gp", ".mts", ".m2ts"}
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac",
+              ".wma", ".amr", ".aif", ".aiff"}
 
-SUPPORTED_EXTS = IMAGE_EXTS | PDF_EXTS | VIDEO_EXTS
+SUPPORTED_EXTS = IMAGE_EXTS | PDF_EXTS | VIDEO_EXTS | AUDIO_EXTS
 
 
 def ext_of(path: str) -> str:
@@ -75,6 +77,8 @@ def kind_of(path: str) -> str:
         return "pdf"
     if e in VIDEO_EXTS:
         return "video"
+    if e in AUDIO_EXTS:
+        return "audio"
     return "other"
 
 

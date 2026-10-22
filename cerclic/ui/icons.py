@@ -152,6 +152,86 @@ def draw_icon(p: QPainter, name: str, cx: float, cy: float, size: float,
         path.closeSubpath()
         p.setBrush(color)
         p.drawPath(path)
+    elif name == "copy":
+        p.drawRoundedRect(QRectF(cx - r * 0.85, cy - r * 0.55, r * 1.2, r * 1.4), 2.5, 2.5)
+        p.drawRoundedRect(QRectF(cx - r * 0.35, cy - r * 0.95, r * 1.2, r * 1.4), 2.5, 2.5)
+    elif name == "assemble":
+        g = r * 0.12
+        for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+            p.drawRoundedRect(QRectF(cx + (g if dx > 0 else -r * 0.85),
+                                     cy + (g if dy > 0 else -r * 0.85),
+                                     r * 0.85 - g, r * 0.85 - g), 2, 2)
+    elif name == "shield":
+        path = QPainterPath(QPointF(cx, cy - r))
+        path.lineTo(QPointF(cx + r * 0.8, cy - r * 0.62))
+        path.cubicTo(QPointF(cx + r * 0.8, cy + r * 0.2), QPointF(cx + r * 0.4, cy + r * 0.7),
+                     QPointF(cx, cy + r))
+        path.cubicTo(QPointF(cx - r * 0.4, cy + r * 0.7), QPointF(cx - r * 0.8, cy + r * 0.2),
+                     QPointF(cx - r * 0.8, cy - r * 0.62))
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawLine(QPointF(cx - r * 0.32, cy), QPointF(cx - r * 0.05, cy + r * 0.28))
+        p.drawLine(QPointF(cx - r * 0.05, cy + r * 0.28), QPointF(cx + r * 0.38, cy - r * 0.22))
+    elif name == "pages":
+        p.drawRoundedRect(QRectF(cx - r * 0.35, cy - r, r * 1.15, r * 1.45), 2, 2)
+        p.setBrush(QColor(30, 33, 42))
+        p.drawRoundedRect(QRectF(cx - r * 0.8, cy - r * 0.45, r * 1.15, r * 1.45), 2, 2)
+    elif name == "text":
+        p.drawLine(QPointF(cx - r * 0.75, cy - r * 0.75), QPointF(cx + r * 0.75, cy - r * 0.75))
+        p.drawLine(QPointF(cx, cy - r * 0.75), QPointF(cx, cy + r * 0.85))
+        p.drawLine(QPointF(cx - r * 0.35, cy + r * 0.85), QPointF(cx + r * 0.35, cy + r * 0.85))
+    elif name == "trim":
+        for sy in (-1, 1):
+            p.drawEllipse(QPointF(cx - r * 0.55, cy + sy * r * 0.5), r * 0.3, r * 0.3)
+            p.drawLine(QPointF(cx - r * 0.3, cy + sy * r * 0.36), QPointF(cx + r, cy - sy * r * 0.55))
+    elif name == "mute":
+        path = QPainterPath(QPointF(cx - r * 0.9, cy - r * 0.3))
+        path.lineTo(QPointF(cx - r * 0.45, cy - r * 0.3))
+        path.lineTo(QPointF(cx + r * 0.05, cy - r * 0.8))
+        path.lineTo(QPointF(cx + r * 0.05, cy + r * 0.8))
+        path.lineTo(QPointF(cx - r * 0.45, cy + r * 0.3))
+        path.lineTo(QPointF(cx - r * 0.9, cy + r * 0.3))
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawLine(QPointF(cx + r * 0.4, cy - r * 0.3), QPointF(cx + r, cy + r * 0.3))
+        p.drawLine(QPointF(cx + r, cy - r * 0.3), QPointF(cx + r * 0.4, cy + r * 0.3))
+    elif name == "mirror":
+        dash = QPen(pen)
+        dash.setStyle(Qt.DashLine)
+        dash.setWidthF(max(1.0, pen.widthF() * 0.6))
+        p.setPen(dash)
+        p.drawLine(QPointF(cx, cy - r), QPointF(cx, cy + r))
+        p.setPen(pen)
+        left = QPainterPath(QPointF(cx - r * 0.2, cy - r * 0.65))
+        left.lineTo(QPointF(cx - r * 0.2, cy + r * 0.65))
+        left.lineTo(QPointF(cx - r, cy + r * 0.65))
+        left.closeSubpath()
+        p.setBrush(color)
+        p.drawPath(left)
+        p.setBrush(Qt.NoBrush)
+        right = QPainterPath(QPointF(cx + r * 0.2, cy - r * 0.65))
+        right.lineTo(QPointF(cx + r * 0.2, cy + r * 0.65))
+        right.lineTo(QPointF(cx + r, cy + r * 0.65))
+        right.closeSubpath()
+        p.drawPath(right)
+    elif name == "row":
+        for k in (-1, 0, 1):
+            p.drawRoundedRect(QRectF(cx + k * r * 0.7 - r * 0.3, cy - r * 0.55, r * 0.6, r * 1.1), 1.5, 1.5)
+    elif name == "column":
+        for k in (-1, 0, 1):
+            p.drawRoundedRect(QRectF(cx - r * 0.55, cy + k * r * 0.7 - r * 0.3, r * 1.1, r * 0.6), 1.5, 1.5)
+    elif name == "grid":
+        for dx in (-1, 1):
+            for dy in (-1, 1):
+                p.drawRoundedRect(QRectF(cx + dx * r * 0.45 - r * 0.38, cy + dy * r * 0.45 - r * 0.38,
+                                         r * 0.76, r * 0.76), 1.5, 1.5)
+    elif name == "cat_audio":
+        p.drawLine(QPointF(cx - r * 0.25, cy + r * 0.55), QPointF(cx - r * 0.25, cy - r * 0.8))
+        p.drawLine(QPointF(cx - r * 0.25, cy - r * 0.8), QPointF(cx + r * 0.75, cy - r * 0.95))
+        p.drawLine(QPointF(cx + r * 0.75, cy - r * 0.95), QPointF(cx + r * 0.75, cy + r * 0.4))
+        p.setBrush(color)
+        p.drawEllipse(QPointF(cx - r * 0.5, cy + r * 0.6), r * 0.3, r * 0.22)
+        p.drawEllipse(QPointF(cx + r * 0.5, cy + r * 0.45), r * 0.3, r * 0.22)
     elif name == "more":
         p.setPen(Qt.NoPen)
         p.setBrush(color)
