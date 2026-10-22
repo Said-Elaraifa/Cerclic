@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Build outputs
+build/
+dist/
+dist_installer/
+*.spec.bak
+assets/ffmpeg/
+ffmpeg_tmp/
+ffmpeg.zip
+
+# Scratch previews
+scripts/preview_*.png
+scripts/smoke_*.png
+scripts/_crop_src.png
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Diagnostic log
+cerclic.log
