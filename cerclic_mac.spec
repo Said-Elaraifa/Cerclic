@@ -32,7 +32,7 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    runtime_hooks=[],
+    runtime_hooks=[os.path.join(ROOT, "scripts", "pyi_rth_cv2.py")],   # OpenCV in a .app
     excludes=["PyQt5", "PyQt6", "PySide2", "tkinter", "matplotlib", "pandas",
               "pillow_heif", "scipy", "IPython", "pytest", "pytestqt",
               "PySide6.QtWebEngineCore", "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtPdf",

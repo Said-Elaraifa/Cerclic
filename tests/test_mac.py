@@ -225,3 +225,65 @@ def test_finder_gets_the_keyboard_back(qtbot, monkeypatch, jpg_photo):
             a.session.close()
         a.server.server.close()
         a.tray.hide()
+
+
+# ----- OpenCV inside Cerclic.app -----------------------------------------------------------
+
+_LOAD_CV2 = r"""
+import sys
+app, site, hook = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert(0, site)
+import numpy                     # the app's own numpy (cv2 needs it)
+sys.path.remove(site)
+fw = app + "/Contents/Frameworks"
+sys.path[:] = [fw] + [p for p in sys.path if "-packages" not in p] + [fw]   # as in the .app
+if hook:
+    exec(open(hook, encoding="utf-8").read())
+import cv2
+print("cv2 ok" if hasattr(cv2, "imread") else "cv2 incomplete")
+"""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symbolic links, as in a .app bundle")
+def test_opencv_loads_in_the_app_layout(tmp_path):
+    """PyInstaller puts cv2's .py files in Contents/Resources and its binary in
+    Contents/Frameworks, each linked into the other: OpenCV's loader then
+    imports itself again ("recursion is detected", the "En Word" action failed
+    on the Mac) unless scripts/pyi_rth_cv2.py, declared in cerclic_mac.spec,
+    runs first."""
+    import sys
+    cv2 = pytest.importorskip("cv2")
+    src = os.path.dirname(os.path.realpath(cv2.__file__))
+    site = os.path.dirname(src)
+    contents = tmp_path / "Cerclic.app" / "Contents"
+    fw, res = contents / "Frameworks" / "cv2", contents / "Resources" / "cv2"
+    fw.mkdir(parents=True)
+    res.mkdir(parents=True)
+    for name in os.listdir(src):
+        p = os.path.join(src, name)
+        if name.startswith("cv2") and name.endswith((".so", ".pyd")):
+            os.symlink(p, fw / name)                     # binary: Frameworks
+            os.symlink(fw / name, res / name)
+        elif os.path.isdir(p):
+            if name != "__pycache__":
+                os.symlink(p, res / name)                # data folder: Resources
+                os.symlink(res / name, fw / name)
+        elif name.endswith(".py"):
+            shutil.copy(p, res / name)                   # .py files: Resources
+            os.symlink(res / name, fw / name)
+    for libs in os.listdir(site):                        # the wheel's own libraries
+        if libs.startswith("opencv") and libs.endswith(".libs"):
+            for side in ("Frameworks", "Resources"):
+                os.symlink(os.path.join(site, libs), contents / side / libs)
+
+    def run(hook: str) -> str:
+        done = subprocess.run([sys.executable, "-I", "-c", _LOAD_CV2,
+                               str(tmp_path / "Cerclic.app"), site, hook],
+                              capture_output=True, text=True, timeout=120)
+        return done.stdout + done.stderr
+
+    hook = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "pyi_rth_cv2.py")
+    assert "recursion is detected" in run("")            # the layout reproduces the failure
+    assert "cv2 ok" in run(hook)                         # and the hook fixes it
+    with open(os.path.join(os.path.dirname(hook), "..", "cerclic_mac.spec"), encoding="utf-8") as f:
+        assert "pyi_rth_cv2.py" in f.read()
