@@ -376,11 +376,18 @@ class CerclicApp(QObject):
         self._opened: list[str] = []
         self._opened_timer = QTimer(self, singleShot=True, interval=150)
         self._opened_timer.timeout.connect(self._open_received)
+        self._files_at = 0.0
         if isinstance(qapp, FileOpenApp):
             qapp.on_file = self._file_opened
             for path in qapp.early_files:
                 self._file_opened(path)
             qapp.early_files.clear()
+        # macOS: opened again while it runs (Finder, Launchpad, Spotlight), it
+        # shows its window, as any Mac application does (it lives in the menu
+        # bar, where its icon may be hidden by the notch)
+        self._quiet_until = time.monotonic() + 2.0
+        if IS_MAC:
+            qapp.applicationStateChanged.connect(self._on_app_state)
         self._build_tray()
         self.apply_integration()
         if self.packaged:
@@ -730,7 +737,24 @@ class CerclicApp(QObject):
                      auto_ms=25000)
 
     # -- files sent by macOS ---------------------------------------------------------------
+    def _on_app_state(self, state) -> None:
+        if state == Qt.ApplicationActive:
+            QTimer.singleShot(600, self._reopened)
+
+    def _reopened(self) -> None:
+        """Cerclic became the active application with nothing of its own on the
+        screen: the user opened it again. Its window comes up."""
+        if (QApplication.applicationState() != Qt.ApplicationActive
+                or time.monotonic() < self._quiet_until
+                or self.session is not None or self._opened
+                or time.monotonic() - self._files_at < 3.0):
+            return
+        if any(w.isVisible() for w in QApplication.topLevelWidgets()):
+            return
+        self.open_settings()
+
     def _file_opened(self, path: str) -> None:
+        self._files_at = time.monotonic()
         self.files_received = True
         self._opened.append(path)
         self._opened_timer.start()          # one request for the whole bunch
@@ -1331,6 +1355,8 @@ def run_resident(cmd: str, paths: list[str], lock) -> int:
         log_exception("échec au démarrage")
         return 1
     app._lock = lock  # held for the life of the process
+    if cmd == "background":           # started with the session: no window
+        app._quiet_until = time.monotonic() + 10.0
     qapp.aboutToQuit.connect(app.shutdown)
 
     def first_request():

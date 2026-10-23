@@ -299,3 +299,30 @@ def test_opencv_loads_in_the_app_layout(tmp_path):
     assert "cv2 ok" in run(hook)                         # and the hook fixes it
     with open(os.path.join(os.path.dirname(hook), "..", "cerclic_mac.spec"), encoding="utf-8") as f:
         assert "pyi_rth_cv2.py" in f.read()
+
+
+def test_opened_again_shows_the_window(qtbot, monkeypatch):
+    """Double-clicking Cerclic while it runs (its menu bar icon may hide behind
+    the notch) brings up its window; not when it was just started with the
+    session, nor while a wheel or one of its windows is on the screen."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    from cerclic import app as app_mod
+    a = app_mod.CerclicApp(QApplication.instance())
+    opened = []
+    monkeypatch.setattr(a, "open_settings", lambda *args, **kw: opened.append(1))
+    monkeypatch.setattr(app_mod.QApplication, "applicationState",
+                        staticmethod(lambda: Qt.ApplicationActive))
+    try:
+        a._reopened()
+        assert opened == []                       # just started: nothing yet
+        a._quiet_until = 0.0
+        a._reopened()
+        assert opened == [1]
+        a._files_at = app_mod.time.monotonic()    # files from the Finder: the wheel comes
+        a._reopened()
+        assert opened == [1]
+    finally:
+        a.cards.close_all()
+        a.server.server.close()
+        a.tray.hide()
