@@ -8,6 +8,7 @@ returning the output paths. `needs` lists what the UI must gather first:
     "pages"      the page organiser popup (PDF)
     "trim"       the cutting popup (video, sound)
     "social"     the social networks popup (format, background, framing)
+    "compress"   the compression popup (how much, and the size it gives)
     "text"       a text typed in a bubble
     "new_password"  a password typed in a bubble
 `choices` turns the action into a small ring of variants (rotate left/right...).
@@ -105,6 +106,8 @@ def each(paths, ctx, fn) -> list[str]:
             outputs.extend(out)
         elif out:
             outputs.append(out)
+        if out and ctx is not None and hasattr(ctx, "sources"):
+            ctx.sources.append(p)
     if not outputs and failed is not None:
         raise failed
     if not outputs and skipped is not None:
@@ -150,6 +153,22 @@ def _framing(o: dict, path: str) -> tuple:
     return (0.5, 0.5), 1.0
 
 
+def _precomputed(o: dict, path: str, run):
+    """run(file already made by the « Compresser » popup for this path, or
+    None); that file never stays behind in the temporary folder."""
+    made = (o.get("precomputed") or {}).get(path)
+    try:
+        return run(made)
+    finally:
+        if made:
+            try:
+                if os.path.exists(made):
+                    os.remove(made)
+                os.rmdir(os.path.dirname(made))
+            except OSError:
+                pass
+
+
 def _social_image(p: str, o: dict) -> str:
     return social.social_image(p, o["social"], o.get("social_mode", "fill"),
                                *_framing(o, p), quality=_q(o))
@@ -183,7 +202,8 @@ ACTIONS: list[Action] = [
     Action("img_compress", "Compresser", "image", frozenset({"image"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: images.compress_image(
                p, int(o.get("quality", 70)))),
-           icon="compress", desc="Plus léger, même taille", title="Compression"),
+           icon="compress", needs=("compress",), desc="Plus léger, même taille",
+           title="Compression"),
     Action("img_convert", "Convertir", "image", frozenset({"image"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: images.convert_image(
                p, o.get("fmt", "jpg"), _q(o))),
@@ -221,9 +241,10 @@ ACTIONS: list[Action] = [
                                                o.get("crop_page"), _pw(o, paths[0]))],
            icon="crop", needs=("crop",), max_files=1, desc="Couper les marges", title="Rognage"),
     Action("pdf_compress", "Compresser", "pdf", frozenset({"pdf"}),
-           lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.compress_pdf(
-               p, _pw(o, p), ctx)),
-           icon="compress", desc="Plus léger à envoyer", title="Compression"),
+           lambda paths, o, ctx: each(paths, ctx, lambda p: _precomputed(o, p, lambda pre:
+               pdf.compress_pdf(p, _pw(o, p), ctx, o.get("level", "medium"), pre))),
+           icon="compress", needs=("compress",), desc="Plus léger à envoyer",
+           title="Compression"),
     Action("pdf_merge", "Fusionner", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: [pdf.merge_pdfs(paths, {p: _pw(o, p) for p in paths},
                                                  ctx)],
@@ -286,9 +307,10 @@ ACTIONS: list[Action] = [
            icon="social", needs=("social",), desc="Reels, TikTok, Shorts, PC",
            title="Format réseaux sociaux"),
     Action("vid_compress", "Compresser", "video", frozenset({"video"}),
-           lambda paths, o, ctx: each(paths, ctx, lambda p: video.compress_video(
-               p, ctx=ctx)),
-           icon="compress", desc="Plus légère, en MP4", title="Compression"),
+           lambda paths, o, ctx: each(paths, ctx, lambda p: _precomputed(o, p, lambda pre:
+               video.compress_video(p, o.get("level", "medium"), ctx, pre))),
+           icon="compress", needs=("compress",), desc="Plus légère, en MP4",
+           title="Compression"),
     Action("vid_mp4", "En MP4", "video", frozenset({"video"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.to_mp4(p, ctx=ctx)),
            icon="mp4", desc="Lisible partout", title="Conversion en MP4"),
@@ -319,8 +341,9 @@ ACTIONS: list[Action] = [
            icon="mp3", desc="Lisible partout", title="Conversion en MP3"),
     Action("aud_compress", "Compresser", "audio", frozenset({"audio"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.compress_audio(
-               p, ctx=ctx)),
-           icon="compress", desc="Plus léger, en MP3", title="Compression"),
+               p, o.get("level", "strong"), ctx=ctx)),
+           icon="compress", needs=("compress",), desc="Plus léger, en MP3",
+           title="Compression"),
 ]
 
 BY_ID = {a.id: a for a in ACTIONS}

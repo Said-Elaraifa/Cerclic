@@ -25,6 +25,7 @@ DEFAULTS: dict = {
     "output_mode": "beside",    # results: "beside" the original, in "folder", or "ask"
     "output_folder": "",        # that folder
     "social_last": {},          # format and background last chosen: {"image": [...], "video": [...]}
+    "compress_levels": {},      # strength last chosen to compress: {"pdf": "medium", ...}
     "welcome_shown": False,
 }
 # Keys from older versions (gesture, hold_ms...) are dropped on load.

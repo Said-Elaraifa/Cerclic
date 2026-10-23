@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter
 from PySide6.QtWidgets import (QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout, QWidget)
 
+from ..sizes import change, human, size_of
 from .theme import (ACCENT, ACCENT_STRONG, BORDER, BUTTON_QSS, ERROR, MUTED, OK, TEXT,
                     WARN, card_qss)
 
@@ -309,8 +310,19 @@ class JobCard(Card):
             n = len(self._outputs)
             text = (_elided(self._status, os.path.basename(self._outputs[0]), 290)
                     if n == 1 else f"{n} fichiers créés")
-            where = folder_label(self._outputs)
-            text += "\nDans\u00a0«\u00a0" + where + "\u00a0»"
+            where = "\u00a0«\u00a0" + folder_label(self._outputs) + "\u00a0»"
+            # (sizes measured with the work, off the interface: a network drive
+            # can be slow to answer)
+            after = getattr(result, "bytes_after", 0) or size_of(self._outputs)
+            sources = list(getattr(result, "sources", []) or [])
+            if result.action_id.endswith("_compress") and sources:
+                # what the compression gained, the reason it was done
+                before = getattr(result, "bytes_before", 0) or size_of(sources)
+                text += "\n" + change(before, after) + "\nDans" + where
+            elif after:
+                text += f"\n{human(after)}" + (" en tout" if n > 1 else "") + " · dans" + where
+            else:
+                text += "\nDans" + where
             if n == 1 and not self._status.toolTip():
                 self._status.setToolTip(self._outputs[0])
             notes = list(getattr(result, "notes", []) or [])

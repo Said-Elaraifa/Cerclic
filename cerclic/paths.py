@@ -303,6 +303,20 @@ def output_dir_for(src: str, tag: str) -> str:
                           folder)
 
 
+def move_into(made: str, dest: str) -> None:
+    """Put a file made elsewhere (a temporary folder) at `dest`, a path
+    reserved by output_for: renamed on the same drive, copied otherwise."""
+    try:
+        os.replace(made, dest)
+    except OSError:
+        import shutil
+        shutil.copyfile(made, dest)
+        try:
+            os.remove(made)
+        except OSError:
+            pass
+
+
 def sibling_path(src: str, name: str) -> str:
     """Reserved path for an explicitly named sibling."""
     folder = _home_of(src)

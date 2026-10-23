@@ -515,10 +515,25 @@ def _looks_the_same(a: str, b: str, password: str | None, max_pages: int = 40) -
     return True
 
 
-def compress_pdf(src: str, password: str | None = None, ctx=None) -> str:
+# How hard « Compresser » works on a PDF: images brought down to this many dots
+# per inch (those above 1.2 times that), re-encoded at this JPEG quality.
+PDF_LEVELS = {"light": (220, 85), "medium": (150, 72), "strong": (110, 60), "max": (80, 45)}
+
+
+def compress_pdf(src: str, password: str | None = None, ctx=None, level: str = "medium",
+                 precomputed: str | None = None) -> str:
     """Downsample and re-encode heavy images, then rewrite the file compactly.
     Text stays sharp and selectable. Delicate images (print colours...) are
-    kept as they are, and the result is compared with the original."""
+    kept as they are, and the result is compared with the original.
+    `precomputed`: the same compression, already made by the popup that
+    showed its size; it is simply moved into place."""
+    if precomputed and os.path.isfile(precomputed):
+        from ..paths import move_into
+        out = output_for(src, "compressed", new_ext=".pdf")
+        move_into(precomputed, out)
+        return out
+    dpi_target, quality = PDF_LEVELS.get(level, PDF_LEVELS["medium"])
+    dpi_threshold = round(dpi_target * 1.2)
     out = output_for(src, "compressed", new_ext=".pdf")
     save_opts = dict(garbage=4, deflate=True, deflate_images=True, deflate_fonts=True,
                      clean=True, use_objstms=1)
@@ -527,13 +542,15 @@ def compress_pdf(src: str, password: str | None = None, ctx=None) -> str:
         progress(ctx, None, "Compression des images")
         delicate = _delicate_images(doc)
         try:
-            # Plain photos and scans go to exactly 150 dpi (MuPDF alone only
-            # halves or quarters them: a 290 dpi photo would stay at 290 dpi)...
-            touched = _downsample_images(doc, delicate, ctx=ctx) > 0
+            # Plain photos and scans go to exactly the target (150 dpi...): MuPDF
+            # alone only halves or quarters them, a 290 dpi photo would stay so...
+            touched = _downsample_images(doc, delicate, dpi_threshold, dpi_target, quality,
+                                         ctx=ctx) > 0
             if not delicate:
                 # ...then MuPDF re-encodes everything else (masks, palettes...).
                 progress(ctx, None, "Compression des images")
-                doc.rewrite_images(dpi_threshold=180, dpi_target=150, quality=72)
+                doc.rewrite_images(dpi_threshold=dpi_threshold, dpi_target=dpi_target,
+                                   quality=quality)
                 touched = True
         except Cancelled:
             raise

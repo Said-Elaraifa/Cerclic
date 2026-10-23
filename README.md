@@ -33,6 +33,16 @@ fichier, par exemple `photo (compressé).jpg`, à côté de l'original, dans le
 dossier de ton choix, ou là où tu le dis à chaque fois. « Supprimer » sur la
 carte de résultat l'efface si tu n'en veux pas.
 
+**Compresser, en voyant la taille obtenue.** Pour une image, une réglette
+« Qualité » : la taille du fichier à venir s'affiche à côté pendant que tu la
+bouges (la taille exacte, celle que tu obtiendras), avec l'aperçu du résultat
+et une loupe à 100 % pour juger la netteté. Pour un PDF, une vidéo ou un son,
+quatre forces (Légère, Moyenne, Forte, Maximale) avec la taille de chacune :
+exacte pour un PDF ou une vidéo courte (et rien n'est refait au moment de
+compresser), estimée sur des extraits pour une vidéo plus longue. Cerclic
+retient ton dernier choix. Chaque carte de résultat donne la taille du fichier
+créé, et pour une compression : avant → après et le pourcentage gagné.
+
 **Réseaux sociaux** (images et vidéos) : « Réseaux » met un fichier aux
 dimensions exactes attendues, avec un aperçu du résultat.
 
@@ -118,7 +128,7 @@ l'ouverture de session), puis mets Cerclic.app à la corbeille.
 python -m venv .venv
 .venv\Scripts\activate          (Mac : source .venv/bin/activate)
 pip install -r requirements-dev.txt
-pytest                          # 290+ tests : actions, interface, Windows, Mac
+pytest                          # 330+ tests : actions, interface, Windows, Mac
 python run_cerclic.py           # lancer depuis le code
 ```
 

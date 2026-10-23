@@ -443,12 +443,23 @@ def cerclic_app(qtbot):
     app.tray.hide()
 
 
+def _accept_compress(qtbot, app):
+    """« Compresser » now asks how much: take what it proposes."""
+    from cerclic.ui.compress_editor import CompressEditor
+    qtbot.waitUntil(lambda: any(isinstance(w, CompressEditor) for w in app._live),
+                    timeout=5000)
+    ed = next(w for w in app._live if isinstance(w, CompressEditor))
+    qtbot.waitUntil(ed.ok_btn.isEnabled, timeout=20000)
+    ed.validate()
+
+
 def test_request_opens_wheel_and_runs_action(qtbot, cerclic_app, jpg_photo):
     cerclic_app.handle_request("open", [jpg_photo])
     s = cerclic_app.session
     assert s is not None and s.wheel.isVisible()
     _click_slice(qtbot, s.wheel, "Compresser")
     assert cerclic_app.session is None
+    _accept_compress(qtbot, cerclic_app)
     folder = os.path.dirname(jpg_photo)
     qtbot.waitUntil(lambda: any("(compressé)" in f for f in os.listdir(folder)), timeout=8000)
     qtbot.waitUntil(lambda: any(getattr(c, "_outputs", None) for c in cerclic_app.cards._cards),
@@ -479,6 +490,7 @@ def test_password_flow(qtbot, cerclic_app, pdf_locked):
     bubble = next(w for w in cerclic_app._live if isinstance(w, PromptBubble))
     qtbot.keyClicks(bubble.edit, "secret")
     qtbot.keyClick(bubble.edit, Qt.Key_Return)
+    _accept_compress(qtbot, cerclic_app)
     folder = os.path.dirname(pdf_locked)
     qtbot.waitUntil(lambda: any(getattr(c, "_outputs", None) or "échoué" in
                                 c._head.text() for c in cerclic_app.cards._cards

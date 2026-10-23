@@ -836,7 +836,8 @@ class SettingsWindow(QWidget):
         self.compress_q = _slider(10, 95, self.s.get("compress_quality"))
         self.compress_val = label("", "row")
         self.compress_q.valueChanged.connect(self._quality_changed)
-        g.add(Row("Compression des images", "Pour l'action « Compresser ».",
+        g.add(Row("Compression des images", "Réglage proposé par « Compresser », qui "
+                  "montre la taille obtenue et retient ton dernier choix.",
                   self.compress_val, below=_scale(self.compress_q)))
         self.jpg_q = _slider(50, 100, self.s.get("jpg_quality"))
         self.jpg_val = label("", "row")

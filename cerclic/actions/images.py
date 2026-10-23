@@ -357,42 +357,67 @@ def to_jpg(src: str) -> str:
     return convert_image(src, "jpg")
 
 
-def _quantize(im: Image.Image) -> Image.Image:
-    """256-colour palette with dithering: the TinyPNG trick, keeps alpha."""
+def _quantize(im: Image.Image, colors: int = 256) -> Image.Image:
+    """A palette of `colors` with dithering: the TinyPNG trick, keeps alpha."""
     im = _to_8bit(im)            # 16-bit grey would be clipped to white
     if im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info):
-        return im.convert("RGBA").quantize(256, method=Image.Quantize.FASTOCTREE,
+        return im.convert("RGBA").quantize(colors, method=Image.Quantize.FASTOCTREE,
                                            dither=Image.Dither.FLOYDSTEINBERG)
-    return im.convert("RGB").quantize(256, method=Image.Quantize.MEDIANCUT,
+    return im.convert("RGB").quantize(colors, method=Image.Quantize.MEDIANCUT,
                                       dither=Image.Dither.FLOYDSTEINBERG)
 
 
+def png_colors(quality: int) -> int | None:
+    """Colours a PNG keeps when compressed at `quality` (None: all of them,
+    the file is only packed tighter). 70 % and up: 256, which does not show."""
+    q = int(quality)
+    for at_least, colors in ((90, None), (70, 256), (55, 128), (40, 64), (25, 32)):
+        if q >= at_least:
+            return colors
+    return 16
+
+
+def _encode(pic: Picture, fmt: str, quality: int | None = None,
+            optimize: bool = False) -> bytes:
+    buf = io.BytesIO()
+    save(pic, buf, fmt, quality=quality, optimize=optimize)
+    return buf.getvalue()
+
+
+def compressed_data(pic: Picture, src_ext: str, quality: int) -> tuple[str, str, bytes]:
+    """What « Compresser » writes for this picture at `quality`, without
+    writing it: (format, extension, the file's bytes). The popup shows the
+    exact size the action will give, from the very same bytes.
+    JPG and WEBP are re-encoded at `quality`; PNG keeps fewer colours as the
+    quality goes down (see png_colors); other formats become JPG (PNG when
+    transparent). The dimensions never change."""
+    q = int(quality)
+    e = src_ext.lower()
+    if e == ".gif":
+        return "gif", ".gif", _encode(pic, "gif", optimize=True)
+    if e == ".webp":
+        return "webp", ".webp", _encode(pic, "webp", quality=q)
+    if pic.animated:
+        pic = Picture(pic.frames[:1], [], 0, pic.icc, pic.exif, pic.dpi, pic.source_format)
+    if e == ".png" or (pic.has_alpha and e not in (".jpg", ".jpeg", ".jfif")):
+        colors = png_colors(q)
+        if colors:
+            pic = pic.map(lambda f: _quantize(f, colors))
+        return "png", ".png", _encode(pic, "png", optimize=True)
+    return "jpg", ".jpg", _encode(pic, "jpg", quality=q)
+
+
 def compress_image(src: str, quality: int = 70) -> str:
-    """Lighter copy with the same dimensions. JPG and WEBP are re-encoded at
-    `quality`; PNG is reduced to an optimised 256-colour palette; other formats
-    become JPG. Raises NothingToDo when the result would not be smaller."""
+    """Lighter copy with the same dimensions (see compressed_data). Raises
+    NothingToDo when the result would not be smaller."""
     pic = load(src).to_srgb()
     _one_page(src, pic)
-    e = ext_of(src)
-    if e == ".png" and not pic.animated:
-        pic = pic.map(_quantize)
-        out = _write(src, pic, "compressed", fmt="png", optimize=True)
-    elif e == ".webp":
-        out = _write(src, pic, "compressed", fmt="webp", quality=quality)
-    elif e == ".gif":
-        out = _write(src, pic, "compressed", fmt="gif", optimize=True)
-    else:
-        if pic.animated:
-            pic = Picture(pic.frames[:1], [], 0, pic.icc, pic.exif, pic.dpi,
-                          pic.source_format)
-        fmt = "png" if pic.has_alpha and e not in (".jpg", ".jpeg", ".jfif") else "jpg"
-        if fmt == "png":
-            pic = pic.map(_quantize)
-        out = _write(src, pic, "compressed", fmt=fmt, quality=quality,
-                     optimize=fmt == "png")
-    if os.path.getsize(out) >= os.path.getsize(src):
-        os.remove(out)
+    _, ext, data = compressed_data(pic, ext_of(src), quality)
+    if len(data) >= os.path.getsize(src):
         raise NothingToDo("Cette image est déjà bien compressée.")
+    out = output_for(src, "compressed", new_ext=ext)
+    with open(out, "wb") as f:
+        f.write(data)
     return out
 
 

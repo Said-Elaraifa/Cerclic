@@ -135,10 +135,30 @@ def _actions(work: str) -> str:
     done.append("img_social")
     res = engine.run("vid_social", [video], {"social": "square", "social_mode": "blur"})
     assert res.ok, f"vid_social : {res.error}"
-    from .actions.video import probe
+    from .actions.video import estimate_compressed, probe
     info = probe(res.outputs[0])
     assert (info.width, info.height) == (1080, 1080), (info.width, info.height)
     done.append("vid_social")
+    # compression with its size worked out first: a picture, then a 20 s video
+    # (estimated through samples: statistics of the encoder, sizes read without
+    # decoding), then compressed
+    from .actions import images
+    data = images.compressed_data(images.load(photo).to_srgb(), ".jpg", 40)[2]
+    res = engine.run("img_compress", [photo], {"quality": 40})
+    assert res.ok and os.path.getsize(res.outputs[0]) == len(data), "img_compress"
+    done.append("img_compress")
+    longer = os.path.join(work, "longer.mp4")
+    subprocess.run([ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+                    "-i", "testsrc=duration=20:size=160x120:rate=10", "-pix_fmt", "yuv420p",
+                    longer], check=True, capture_output=True, timeout=60,
+                   stdin=subprocess.DEVNULL)
+    est_dir = os.path.join(work, "estimates")
+    os.mkdir(est_dir)
+    size, exact, _ = estimate_compressed(longer, "max", est_dir)
+    assert size > 0 and not exact, "estimation"
+    res = engine.run("vid_compress", [longer], {"level": "max"})
+    assert res.ok or res.info, f"vid_compress : {res.error}"
+    done.append("vid_compress (taille estimée)")
     return ", ".join(done)
 
 

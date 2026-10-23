@@ -49,6 +49,16 @@ def _summary(paths: list[str]) -> str:
     return f"{len(paths)} fichiers"
 
 
+def _drop_precomputed(opts: dict) -> None:
+    """A result the compression popup already made, not wanted after all."""
+    for made in (opts.get("precomputed") or {}).values():
+        try:
+            os.remove(made)
+            os.rmdir(os.path.dirname(made))
+        except OSError:
+            pass
+
+
 def _elsewhere_note(sources: list[str], outputs: list[str], chosen: str | None = None) -> str:
     """Say so when results could not go where they should: next to the
     original (protected folder), or in the chosen folder (gone)."""
@@ -376,6 +386,11 @@ class CerclicApp(QObject):
         for p in self.journal.recover():
             log(f"fichier inachevé retiré : {p}")
         _paths.add_reserve_hook(lambda p: self.journal.add(current_job(), p))
+        try:                       # sizes worked out by compression popups closed in a hurry
+            from .ui.compress_editor import clean_stale
+            clean_stale()
+        except Exception:
+            log_exception("nettoyage des fichiers temporaires")
 
     # -- tray ------------------------------------------------------------------------
     def _build_tray(self) -> None:
@@ -752,16 +767,18 @@ class CerclicApp(QObject):
                 opts["passwords"] = passwords
         first_pw = registry._pw(opts, files[0])
         for need in action.needs:
-            if need in ("crop", "social") and len(files) == 1 and kind_of(files[0]) == "image":
+            if need in ("crop", "social", "compress") and len(files) == 1 \
+                    and kind_of(files[0]) == "image":
                 from .actions.images import page_count
                 pages = page_count(files[0])
-                if pages > 1:                  # a scan: say so before any drawing
+                if pages > 1:                  # a scan: say so before any popup
+                    first = {"crop": "Rogner n'en garderait que la première",
+                             "social": "Seule la première serait mise au format",
+                             "compress": "Compresser n'en garderait que la première"}[need]
                     self.message(f"« {os.path.basename(files[0])} » a {pages} pages",
-                                 "Rogner n'en garderait que la première. Utilise "
-                                 "« En PDF » pour les garder toutes, puis Rogner sur "
-                                 "le PDF." if need == "crop" else
-                                 "Seule la première serait mise au format. Utilise "
-                                 "« En PDF » pour les garder toutes.")
+                                 f"{first}. Utilise « En PDF » pour les garder toutes"
+                                 + (f", puis {action.label} sur le PDF."
+                                    if need in ("crop", "compress") else "."))
                     return
             if need == "crop":
                 from .ui.crop_editor import CropEditor
@@ -802,6 +819,22 @@ class CerclicApp(QObject):
                 if res is None:
                     return
                 opts.update(res)
+            elif need == "compress":
+                from .ui.compress_editor import CompressEditor
+                kind = action.category
+                levels = dict(self.settings.get("compress_levels") or {})
+                res = yield self._ask_editor(lambda: CompressEditor(
+                    files, kind, quality=int(self.settings.get("compress_quality")),
+                    level=levels.get(kind), opts=opts), pos)
+                if res is None:
+                    return
+                if "quality" in res:                       # proposed next time
+                    self.settings.set("compress_quality", int(res["quality"]))
+                if "level" in res:
+                    levels[kind] = res["level"]
+                    self.settings.set("compress_levels", levels)
+                self.settings.save()
+                opts.update(res)
             elif need == "social":
                 from .ui.social_editor import SocialEditor
                 kind = "video" if action.category == "video" else "image"
@@ -833,6 +866,7 @@ class CerclicApp(QObject):
         if self.settings.get("output_mode") == "ask":
             folder = yield self._ask_folder(files[0], pos)
             if not folder:
+                _drop_precomputed(opts)
                 return                      # cancelled: nothing is created
             opts["_out_dir"] = folder
         self._run_job(action, files, opts, pos, attempts=0)
@@ -924,6 +958,8 @@ class CerclicApp(QObject):
         def on_done(result):
             job.finished = True
             self._live.discard(job)
+            if not result.ok:
+                _drop_precomputed(opts)      # not taken by the action: it goes
             QTimer.singleShot(0, _gc_now)
             log(f"résultat {result.action_id} : "
                 + (f"ok, {len(result.outputs)} fichier(s) en {result.seconds:.1f} s"

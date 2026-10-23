@@ -191,6 +191,8 @@ def test_ask_each_time_where_results_go(qtbot, monkeypatch, tmp_path, jpg_photo)
         monkeypatch.setattr(QFileDialog, "getExistingDirectory",
                             staticmethod(lambda *args, **kw: asked.append(args) or str(target)))
         a.start_action("img_compress", [jpg_photo], {}, QPoint(300, 300))
+        from test_ui import _accept_compress
+        _accept_compress(qtbot, a)
         qtbot.waitUntil(lambda: any(f.endswith(".jpg") for f in os.listdir(target)),
                         timeout=8000)
         assert asked and asked[0][2] == os.path.dirname(jpg_photo)   # the original's folder first

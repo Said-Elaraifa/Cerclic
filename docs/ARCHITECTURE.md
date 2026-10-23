@@ -17,6 +17,7 @@ cerclic/
   errors.py               erreurs prévues (mot de passe, rien à faire, annulation)
   paths.py                noms de sortie réservés atomiquement, jamais d'écrasement
   settings.py  log.py     réglages JSON et journal (%APPDATA%\Cerclic, ~/Library/Application Support/Cerclic)
+  sizes.py                tailles en mots (« 612 Ko »), comme l'Explorateur ou le Finder
   actions/                traitements purs, testés partout
     images.py  pdf.py  video.py  registry.py  common.py
     social.py             formats des réseaux sociaux (tailles exactes, cadrage, fonds)
@@ -40,6 +41,7 @@ cerclic/
     pages_editor.py       organisation des pages d'un PDF
     trim_editor.py        découpe d'une vidéo ou d'un son
     social_editor.py      « Réseaux » : aperçu du résultat, format, fond, cadrage par fichier
+    compress_editor.py    « Compresser » : qualité ou force, et la taille obtenue avant d'agir
     cards.py              progression puis résultat, en bas à droite
     settings_window.py    la fenêtre de Cerclic : raccourci (enregistreur), clic droit, signature...
     glass.py              verre givré : fond pastel, cartes, interrupteurs, barre latérale
@@ -130,6 +132,19 @@ Windows ouverts en même temps ont chacun leur Cerclic.
   « Me demander à chaque fois » (la question vient juste avant le traitement,
   dans le dossier de l'original). Un dossier où l'on ne peut pas écrire
   renvoie vers Téléchargements.
+- **Compresser** (`ui/compress_editor.py`) : pour une image, la réglette fait
+  fabriquer en arrière-plan les octets mêmes que l'action écrira
+  (`images.compressed_data`), d'où une taille exacte et un aperçu fidèle (loupe
+  à 100 %). PDF, vidéo, son : quatre forces (`PDF_LEVELS`, `VIDEO_LEVELS`,
+  `AUDIO_LEVELS`). Un PDF est vraiment compressé dans un dossier temporaire, à
+  chaque force, dans un processus à part ; une vidéo de 15 s ou moins aussi ;
+  le fichier ainsi fait est repris tel quel par l'action (`precomputed`). Une
+  vidéo plus longue est estimée sur trois extraits de 3 s placés là où
+  l'original dépense ses octets (tailles des images lues sans décodage), en
+  écartant le surpoids de l'image clé du début de chaque extrait (statistiques
+  de l'encodeur). Un son : débit × durée, avec le plafond du MP3 aux basses
+  fréquences d'échantillonnage. Les cartes de résultat affichent les tailles,
+  mesurées avec le travail (`Result.bytes_before`, `bytes_after`).
 - **Réseaux sociaux** (`actions/social.py`) : un format est une forme et une
   taille exacte (1080 × 1350...). « Remplir » découpe la partie choisie
   (centre et zoom relatifs, `place_box`) puis la met à la taille ; les fonds

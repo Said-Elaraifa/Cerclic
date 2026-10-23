@@ -35,6 +35,9 @@ class Result:
     info: bool = False          # nothing went wrong, there was just nothing to do
     password_path: str = ""     # with needs_password: the file it was about
     notes: list[str] = field(default_factory=list)  # files a batch had to leave out
+    sources: list[str] = field(default_factory=list)  # the files that gave a result
+    bytes_before: int = 0       # their size...
+    bytes_after: int = 0        # ...and the results' (measured here, off the interface)
 
     @property
     def count(self) -> int:
@@ -48,6 +51,7 @@ class Context:
         self._on_progress = on_progress
         self._cancel = cancel or threading.Event()
         self.notes: list[str] = []      # why some files of a batch were left out
+        self.sources: list[str] = []    # the files that gave a result (sizes before/after)
 
     def note(self, text: str) -> None:
         if text and text not in self.notes:
@@ -130,8 +134,10 @@ def run(action_id: str, paths: list[str], opts: dict | None = None,
                                 f"{action.min_files} fichiers.")
             outputs = [o for o in action.handler(paths, opts, ctx) if o]
             ctx.check()
+            from .sizes import size_of
             return Result(action_id, True, outputs, "", time.perf_counter() - t0,
-                          notes=list(ctx.notes))
+                          notes=list(ctx.notes), sources=list(ctx.sources),
+                          bytes_before=size_of(ctx.sources), bytes_after=size_of(outputs))
         except Cancelled:
             _cleanup(reserved)
             return Result(action_id, False, [], "Annulé", time.perf_counter() - t0,
