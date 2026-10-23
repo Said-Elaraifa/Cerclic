@@ -79,17 +79,21 @@ if [ ! -x "$UV" ] || [ "$("$UV" --version 2>/dev/null | cut -d' ' -f2)" != "$UV_
 fi
 
 say "Python 3.12 et les bibliothèques de Cerclic"
-"$UV" python install 3.12
+"$UV" python install --no-bin 3.12          # stays in .outils (no link in ~/.local/bin)
 rm -rf "$TOOLS/venv"
 "$UV" venv --python 3.12 "$TOOLS/venv"
 PY="$TOOLS/venv/bin/python"
+# Libraries built for macOS 12, whatever this Mac's version: the app (and its
+# disk image) then runs on every Mac from macOS 12, as its Info.plist says.
+if [ "$ARCH" = "arm64" ]; then TRIPLE="aarch64-apple-darwin"; else TRIPLE="x86_64-apple-darwin"; fi
 ONLY_BINARY=""
 for pkg in PySide6-Essentials shiboken6 pillow pi-heif pymupdf pikepdf numpy \
            opencv-python-headless lxml pyinstaller; do
   ONLY_BINARY="$ONLY_BINARY --only-binary $pkg"
 done
 # shellcheck disable=SC2086
-"$UV" pip install --python "$PY" $ONLY_BINARY -r requirements-mac.txt \
+MACOSX_DEPLOYMENT_TARGET=12.0 "$UV" pip install --python "$PY" --python-platform "$TRIPLE" \
+  $ONLY_BINARY -r requirements-mac.txt \
   || fail "installation des bibliothèques impossible (voir le message au-dessus)."
 
 say "ffmpeg (vidéo et son)"
@@ -135,6 +139,11 @@ if [ $INSTALL = 1 ]; then
   DEST="/Applications"
   [ -w "$DEST" ] || DEST="$HOME/Applications"
   mkdir -p "$DEST"
+  if [ -d "$DEST/Cerclic.app" ]; then
+    # A new build has a new signature: macOS would keep refusing the Finder
+    # to it without asking. Forget the old answer, macOS will ask again.
+    tccutil reset AppleEvents com.jannahmarketing.cerclic >/dev/null 2>&1 || true
+  fi
   if rm -rf "$DEST/Cerclic.app" && ditto "$APP" "$DEST/Cerclic.app"; then
     rm -rf "$APP"         # one Cerclic.app only: macOS opens files with this one
     echo "Installé : $DEST/Cerclic.app"

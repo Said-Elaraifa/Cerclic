@@ -187,6 +187,58 @@ _BY_LETTER = {
 _FINDER_SHIFT = set("ACDFGHIKLNOPRTU")      # Maj + Cmd + these: places and views
 
 
+def _system_shortcuts() -> set[tuple[int, int]]:
+    """(modifiers, key code) of the shortcuts macOS itself has turned on
+    (System Settings, Keyboard, Keyboard Shortcuts): RegisterEventHotKey would
+    accept them, but macOS keeps them. Empty when it cannot be asked."""
+    if sys.platform != "darwin" or threading.current_thread() is not threading.main_thread():
+        return set()
+    try:
+        carbon = ctypes.CDLL(CARBON)
+        cf = ctypes.CDLL(CORE_FOUNDATION)
+        vp = ctypes.c_void_p
+        carbon.CopySymbolicHotKeys.restype = ctypes.c_int32
+        carbon.CopySymbolicHotKeys.argtypes = [ctypes.POINTER(vp)]
+        cf.CFArrayGetCount.restype = ctypes.c_long
+        cf.CFArrayGetCount.argtypes = [vp]
+        cf.CFArrayGetValueAtIndex.restype = vp
+        cf.CFArrayGetValueAtIndex.argtypes = [vp, ctypes.c_long]
+        cf.CFDictionaryGetValue.restype = vp
+        cf.CFDictionaryGetValue.argtypes = [vp, vp]
+        cf.CFNumberGetValue.restype = ctypes.c_bool
+        cf.CFNumberGetValue.argtypes = [vp, ctypes.c_long, vp]
+        cf.CFBooleanGetValue.restype = ctypes.c_bool
+        cf.CFBooleanGetValue.argtypes = [vp]
+        cf.CFRelease.restype = None
+        cf.CFRelease.argtypes = [vp]
+        key_code = vp.in_dll(carbon, "kHISymbolicHotKeyCode").value
+        key_mods = vp.in_dll(carbon, "kHISymbolicHotKeyModifiers").value
+        key_on = vp.in_dll(carbon, "kHISymbolicHotKeyEnabled").value
+        hotkeys = vp()
+        if carbon.CopySymbolicHotKeys(ctypes.byref(hotkeys)) != NO_ERR or not hotkeys.value:
+            return set()
+        found: set[tuple[int, int]] = set()
+        try:
+            for i in range(cf.CFArrayGetCount(hotkeys)):
+                info = cf.CFArrayGetValueAtIndex(hotkeys, i)
+                on = cf.CFDictionaryGetValue(info, key_on)
+                if on and not cf.CFBooleanGetValue(on):
+                    continue
+                n_code = cf.CFDictionaryGetValue(info, key_code)
+                n_mods = cf.CFDictionaryGetValue(info, key_mods)
+                if not n_code or not n_mods:
+                    continue
+                code, flags = ctypes.c_int64(0), ctypes.c_int64(0)
+                cf.CFNumberGetValue(n_code, 4, ctypes.byref(code))      # kCFNumberSInt64Type
+                cf.CFNumberGetValue(n_mods, 4, ctypes.byref(flags))
+                found.add((int(flags.value) & (CMD | SHIFT | OPTION | CTRL), int(code.value)))
+        finally:
+            cf.CFRelease(hotkeys)
+        return found
+    except Exception:
+        return set()
+
+
 def check(mods: int, vk: int) -> str | None:
     """Why this combination should not be used, or None if it is fine."""
     mods &= CMD | SHIFT | OPTION | CTRL
@@ -195,6 +247,9 @@ def check(mods: int, vk: int) -> str | None:
         return "Ajoute une touche après Cmd, Ctrl, Option ou Maj."
     if (mods, code) in _SYSTEM:
         return _SYSTEM[(mods, code)]
+    if (mods, code) in _system_shortcuts():
+        return (f"{label(mods, vk)} est déjà un raccourci de macOS (Réglages Système, "
+                "Clavier, Raccourcis clavier). Choisis-en un autre.")
     name = key_name(vk)
     if (mods, name) in _BY_LETTER:
         return _BY_LETTER[(mods, name)]

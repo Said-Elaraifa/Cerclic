@@ -69,6 +69,27 @@ exe = EXE(
 )
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Cerclic")
 
+def _imported(uti: str, conforms: str, exts: list[str], name: str) -> dict:
+    """A file format macOS may not know: declared so that it counts as an
+    image, a video or a sound (Quick Action, « Ouvrir avec »)."""
+    return {"UTTypeIdentifier": uti, "UTTypeDescription": name,
+            "UTTypeConformsTo": [conforms, "public.data"],
+            "UTTypeTagSpecification": {"public.filename-extension": exts}}
+
+
+IMPORTED_TYPES = [
+    _imported("org.matroska.mkv", "public.movie", ["mkv"], "Vidéo Matroska"),
+    _imported("org.webmproject.webm", "public.movie", ["webm"], "Vidéo WebM"),
+    _imported("com.adobe.flash.video", "public.movie", ["flv"], "Vidéo Flash"),
+    _imported("com.microsoft.windows-media-wmv", "public.movie", ["wmv"], "Vidéo WMV"),
+    _imported("org.xiph.ogg-audio", "public.audio", ["ogg", "oga"], "Son Ogg"),
+    _imported("org.xiph.opus", "public.audio", ["opus"], "Son Opus"),
+    _imported("org.xiph.flac", "public.audio", ["flac"], "Son FLAC"),
+    _imported("com.microsoft.windows-media-wma", "public.audio", ["wma"], "Son WMA"),
+    _imported("org.3gpp.adaptive-multi-rate-audio", "public.audio", ["amr"], "Son AMR"),
+    _imported("public.avif", "public.image", ["avif"], "Image AVIF"),
+]
+
 app = BUNDLE(
     coll,
     name="Cerclic.app",
@@ -99,5 +120,6 @@ app = BUNDLE(
             "LSItemContentTypes": ["public.image", "com.adobe.pdf", "public.movie",
                                    "public.audio", "public.audiovisual-content"],
         }],
+        "UTImportedTypeDeclarations": IMPORTED_TYPES,
     },
 )

@@ -32,7 +32,10 @@ def _load() -> dict:
             send_obj=ctypes.CFUNCTYPE(vp, vp, vp, vp)(address),
             count=ctypes.CFUNCTYPE(ctypes.c_ulong, vp, vp)(address),
             at=ctypes.CFUNCTYPE(vp, vp, vp, ctypes.c_ulong)(address),
-            activate_with=ctypes.CFUNCTYPE(ctypes.c_bool, vp, vp, ctypes.c_ulong)(address))
+            activate_with=ctypes.CFUNCTYPE(ctypes.c_bool, vp, vp, ctypes.c_ulong)(address),
+            responds=ctypes.CFUNCTYPE(ctypes.c_bool, vp, vp, vp)(address),
+            yield_to=ctypes.CFUNCTYPE(None, vp, vp, vp)(address),
+            activate_from=ctypes.CFUNCTYPE(ctypes.c_bool, vp, vp, vp, ctypes.c_ulong)(address))
     return _objc
 
 
@@ -66,6 +69,20 @@ def give_back_to_finder() -> bool:
         if not apps or not o["count"](apps, sel(b"count")):
             return False
         finder = o["at"](apps, sel(b"objectAtIndex:"), 0)
-        return bool(finder) and bool(o["activate_with"](finder, sel(b"activateWithOptions:"), 0))
+        if not finder:
+            return False
+        me_app = o["send"](lib.objc_getClass(b"NSApplication"), sel(b"sharedApplication"))
+        # macOS 14 and later: the active application hands over (cooperative
+        # activation); earlier versions do not know these messages.
+        if me_app and o["responds"](me_app, sel(b"respondsToSelector:"),
+                                    sel(b"yieldActivationToApplication:")):
+            o["yield_to"](me_app, sel(b"yieldActivationToApplication:"), finder)
+            if o["responds"](finder, sel(b"respondsToSelector:"),
+                             sel(b"activateFromApplication:options:")):
+                me = o["send"](lib.objc_getClass(b"NSRunningApplication"),
+                               sel(b"currentApplication"))
+                return bool(o["activate_from"](finder, sel(b"activateFromApplication:options:"),
+                                               me, 0))
+        return bool(o["activate_with"](finder, sel(b"activateWithOptions:"), 0))
     except Exception:
         return False

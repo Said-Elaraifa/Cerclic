@@ -703,6 +703,8 @@ class CerclicApp(QObject):
             QTimer.singleShot(250, self._focus_back)
 
     def _focus_back(self) -> None:
+        if QApplication.applicationState() != Qt.ApplicationActive:
+            return                              # the user already went elsewhere
         if self.session is not None:
             return
         for w in list(self._live):
@@ -1040,6 +1042,14 @@ class CerclicApp(QObject):
         self._drive(flow())
 
     def quit(self) -> None:
+        self.shutdown()
+        self.qapp.quit()
+
+    def shutdown(self) -> None:
+        """Stop cleanly: also when macOS quits Cerclic itself (Cmd + Q, logout)."""
+        if getattr(self, "_stopped", False):
+            return
+        self._stopped = True
         log("arrêt de Cerclic")
         if self.hotkey is not None:
             self.hotkey.stop()
@@ -1058,7 +1068,6 @@ class CerclicApp(QObject):
             time.sleep(0.02)
         self.cards.close_all()
         self.tray.hide()
-        self.qapp.quit()
 
 
 # ----- startup ---------------------------------------------------------------------------------
@@ -1123,6 +1132,7 @@ def run_resident(cmd: str, paths: list[str], lock) -> int:
         log_exception("échec au démarrage")
         return 1
     app._lock = lock  # held for the life of the process
+    qapp.aboutToQuit.connect(app.shutdown)
 
     def first_request():
         first = not app.settings.get("welcome_shown")

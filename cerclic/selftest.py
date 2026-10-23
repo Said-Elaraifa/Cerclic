@@ -7,12 +7,32 @@ console. Exit code 0 when everything passed.
 """
 from __future__ import annotations
 
+import base64
 import importlib
 import os
 import shutil
 import sys
 import tempfile
 import time
+
+
+# A 64 x 48 iPhone-style photo (HEIC), to check that HEIC photos open.
+TINY_HEIC = (
+    "AAAAHGZ0eXBoZWljAAAAAG1pZjFoZWljbWlhZgAAAX1tZXRhAAAAAAAAACFoZGxyAAAAAAAAAABw"
+    "aWN0AAAAAAAAAAAAAAAAAAAAACJpbG9jAAAAAERAAAEAAQAAAAABoQABAAAAAAAAAUkAAAAjaWlu"
+    "ZgAAAAAAAQAAABVpbmZlAgAAAAABAABodmMxAAAAAA5waXRtAAAAAAABAAAA/WlwcnAAAADdaXBj"
+    "bwAAAHZodmNDAQNwAAAAkAAAAAAAHvAA/P34+AAADwNgAAEAGEABDAH//wNwAAADAJAAAAMAAAMA"
+    "HroCQGEAAQAqQgEBA3AAAAMAkAAAAwAAAwAeoCCBBZbq5Ka5uAhoMCAAAAMDIAAAAwAhYgABAAZE"
+    "AcFzwIkAAAATY29scm5jbHgAAQANAAaAAAAAFGlzcGUAAAAAAAAAQAAAAEAAAAAoY2xhcAAAAEAA"
+    "AAABAAAAMAAAAAEAAAAAAAAAAv////AAAAACAAAAEHBpeGkAAAAAAwgICAAAABhpcG1hAAAAAAAA"
+    "AAEAAQWBAgMFhAAAAVFtZGF0AAABRSgBrwngFVu5n5D186f+3kbFsdlvr8bvCvcOWP/rQq4Lb/2g"
+    "QE+t0X3D+6bfYodjfsPBH/GOqgRb9Ux5U5HRcts9BpGcew9M/mgPTiP4h1LPqdTaeWkxGI/UFGLv"
+    "Z03EjXetzWT57SsTYt3mE154P+qeTUNAjt2CX44faEBh3xHaKblP1xb4U6eUG0fNZQz2lqX+/vbU"
+    "jWptl/B+80jdtgoewVa8QTkp1LFtwsur4KPfXU5OyfkR5grZbGSJUkA6hhBDnw0uPZ0Dnw7sRWeS"
+    "f00yjtRmiOWmdP1bF2AzZIp7TYpiIpw6rPfH7YGKKXZNzSjzIprlAT7lxPTn9Ry9Mo8GuwFKh84V"
+    "sg4BcLOYeS/8dskQYoLvjbBpRQIcJV1CehEc1WwGuIvithGNEM82JYPYENJ833SpJhmvNf25fwu+"
+    "gT/Wj/A="
+)
 
 
 def _qt() -> str:
@@ -71,8 +91,9 @@ def _ffmpeg() -> str:
 
 
 def _actions(work: str) -> str:
-    """A photo rotated and turned into a PDF, the PDF drawn back into an image
-    and protected, a short video made by ffmpeg then cut: the real code paths."""
+    """An iPhone photo converted, a photo rotated and turned into a PDF, the PDF
+    drawn back into an image and protected, a short video made by ffmpeg then
+    cut: the real code paths."""
     import subprocess
     from PIL import Image
     from . import engine
@@ -80,6 +101,14 @@ def _actions(work: str) -> str:
     photo = os.path.join(work, "photo.jpg")
     Image.new("RGB", (320, 200), (46, 124, 246)).save(photo, quality=90)
     done = []
+    heic = os.path.join(work, "iphone.heic")
+    with open(heic, "wb") as f:
+        f.write(base64.b64decode("".join(TINY_HEIC)))
+    res = engine.run("img_convert", [heic], {"fmt": "jpg"})
+    assert res.ok, f"HEIC : {res.error}"
+    with Image.open(res.outputs[0]) as im:
+        assert im.size == (64, 48), im.size
+    done.append("img_convert (HEIC)")
     for action, opts in (("img_rotate", {"degrees": 90}), ("img_to_pdf", {})):
         res = engine.run(action, [photo], opts)
         assert res.ok, f"{action} : {res.error}"

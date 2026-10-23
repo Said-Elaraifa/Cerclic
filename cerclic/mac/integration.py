@@ -83,7 +83,10 @@ def _service_info() -> dict:
         "NSMenuItem": {"default": SERVICE_NAME},
         "NSMessage": "runWorkflowAsService",
         "NSRequiredContext": {"NSApplicationIdentifier": "com.apple.finder"},
-        "NSSendFileTypes": ["public.data"],          # files, not folders
+        # images, PDF, videos and sounds (the unusual formats are declared by
+        # Cerclic.app, see UTImportedTypeDeclarations in cerclic_mac.spec)
+        "NSSendFileTypes": ["public.image", "com.adobe.pdf", "public.movie",
+                            "public.audio", "public.audiovisual-content"],
     }]}
 
 
@@ -207,6 +210,7 @@ def set_autostart(enabled: bool, app: str | None = None) -> None:
         return
     _write_if_changed(path, plistlib.dumps({
         "Label": BUNDLE_ID,
+        "AssociatedBundleIdentifiers": [BUNDLE_ID],   # listed as Cerclic in Login Items
         "ProgramArguments": ["/usr/bin/open", "-g", "-a", app, "--args", "--background"],
         "RunAtLoad": True,
         "LimitLoadToSessionType": "Aqua",
