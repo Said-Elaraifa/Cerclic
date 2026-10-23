@@ -390,9 +390,11 @@ class CerclicApp(QObject):
         if win is not None:
             win.set_hotkey_status(ok)
         elif not ok:
+            fallback = (" ; le clic droit « Cerclic » marche toujours"
+                        if self.settings.get("context_menu") else "")
             self.message(f"Raccourci {self.hotkey_label()} indisponible",
                          "Une autre application l'utilise déjà. Choisis-en un autre "
-                         "dans Cerclic ; le clic droit « Cerclic » marche toujours.",
+                         f"dans Cerclic{fallback}.",
                          kind="warn", buttons=[("Plus tard", None),
                                                ("Choisir", self.open_settings)])
 

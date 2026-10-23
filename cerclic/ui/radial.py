@@ -13,6 +13,7 @@ away (see dismiss.py).
 from __future__ import annotations
 
 import math
+import sys
 import time
 from dataclasses import dataclass
 
@@ -507,12 +508,12 @@ class Wheel(QWidget):
     def keyPressEvent(self, e):
         k = e.key()
         n = len(self._slices)
+        number = _slice_number(e)
         if k in (Qt.Key_Escape, Qt.Key_Backspace):
             self._back()
-        elif Qt.Key_1 <= k <= Qt.Key_9:
-            i = k - Qt.Key_1
-            if i < n:
-                self.activate(i)
+        elif number is not None:
+            if number < n:
+                self.activate(number)
         elif k in (Qt.Key_Right, Qt.Key_Down, Qt.Key_Tab) and n:
             self._set_hover((self._hover + 1) % n, False)
         elif k in (Qt.Key_Left, Qt.Key_Up, Qt.Key_Backtab) and n:
@@ -558,6 +559,27 @@ class Wheel(QWidget):
         self.hide()
         self.cancelled.emit()
         self.close()
+
+
+# The digit row of an AZERTY keyboard types & é " ' ( - è _ ç without Maj.
+_AZERTY_DIGITS = {Qt.Key_Ampersand: 0, Qt.Key_Eacute: 1, Qt.Key_QuoteDbl: 2,
+                  Qt.Key_Apostrophe: 3, Qt.Key_ParenLeft: 4, Qt.Key_Minus: 5,
+                  Qt.Key_Egrave: 6, Qt.Key_Underscore: 7, Qt.Key_Ccedilla: 8}
+
+
+def _slice_number(e) -> int | None:
+    """0 for the 1 key... 8 for the 9 key, whatever the keyboard layout
+    (top row with or without Maj, numeric keypad); None for other keys."""
+    if sys.platform == "win32":
+        vk = e.nativeVirtualKey()
+        if 0x31 <= vk <= 0x39:
+            return vk - 0x31
+        if 0x61 <= vk <= 0x69:
+            return vk - 0x61
+    k = e.key()
+    if Qt.Key_1 <= k <= Qt.Key_9:
+        return k - Qt.Key_1
+    return _AZERTY_DIGITS.get(k)
 
 
 def _donut_segment(c: QPointF, ri: float, ro: float, start_deg: float,

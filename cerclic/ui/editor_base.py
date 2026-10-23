@@ -256,12 +256,14 @@ class EditorWindow(QWidget):
 
     def place(self) -> None:
         avail = screen_for(self.anchor).availableGeometry()
-        self.setGeometry(popup_rect(self.anchor, self.sizeHint().expandedTo(self.size()),
-                                    avail))
+        self.setGeometry(popup_rect(self.anchor, self.size(), avail))
 
     def refit(self) -> None:
         """The content changed size (another page...): resize, stay on screen."""
-        self.adjustSize()
+        for lay in (self.card.layout(), self.layout()):
+            lay.invalidate()
+            lay.activate()
+        self.resize(self.sizeHint())
         if self.isVisible():
             self.place()
 

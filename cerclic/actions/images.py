@@ -492,6 +492,14 @@ def _strip_jpeg(data: bytes) -> tuple[bytes, bool]:
     return bytes(out), state["removed"]
 
 
+def _orientation(data: bytes) -> int:
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            return int(im.getexif().get(0x0112, 1) or 1)
+    except Exception:
+        return 1
+
+
 def _app1(payload: bytes) -> bytes:
     return b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
 
@@ -551,6 +559,8 @@ def strip_metadata(src: str, quality: int | None = None) -> str:
     try:
         if e in (".jpg", ".jpeg", ".jfif"):
             clean, removed = _strip_jpeg(data)
+        elif e in (".png", ".webp") and _orientation(data) != 1:
+            clean, removed = None, True         # turned by a tag: write it upright
         elif e == ".png":
             clean, removed = _strip_png(data)
         elif e == ".webp":
@@ -579,71 +589,115 @@ def strip_metadata(src: str, quality: int | None = None) -> str:
 
 # ----- several pictures into one ------------------------------------------------------
 
+def _rgb_to_srgb(im: Image.Image, icc: bytes | None) -> Image.Image:
+    """Pixels described by another RGB profile (Display P3, Adobe RGB...) to
+    sRGB, so they keep their colours once the profile is gone."""
+    if not icc or _icc_space(icc) != "RGB" or im.mode not in ("RGB", "RGBA"):
+        return im
+    try:
+        from PIL import ImageCms
+        src = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+        dst = ImageCms.createProfile("sRGB")
+        if im.mode == "RGBA":
+            alpha = im.getchannel("A")
+            rgb = ImageCms.profileToProfile(im.convert("RGB"), src, dst, outputMode="RGB")
+            rgb.putalpha(alpha)
+            return rgb
+        return ImageCms.profileToProfile(im, src, dst, outputMode="RGB")
+    except Exception:
+        return im
+
+
 def assemble_images(srcs: Sequence[str], layout: str = "row",
                     quality: int | None = None, ctx=None) -> str:
     """Put pictures side by side ("row"), one under the other ("column") or in
-    a grid, in the given order, into one new picture beside the first one."""
+    a grid, in the given order, into one new picture beside the first one.
+    Sizes are read from the headers first, then each picture is shrunk to its
+    place as soon as it is read, so memory stays low even with many photos."""
+    import math as _math
     from statistics import median
     srcs = list(srcs)
     if len(srcs) < 2:
         raise UserError("Il faut au moins deux images.")
-    frames = []
-    for k, src in enumerate(srcs):
-        if ctx is not None:
-            ctx.check()
-            ctx.progress(k / (len(srcs) + 1), f"Image {k + 1} sur {len(srcs)}")
-        pic = load(src).to_srgb()
-        im = _to_8bit(pic.frames[0])
-        alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
-        frames.append(im.convert("RGBA" if alpha else "RGB"))
-    has_alpha = any(f.mode == "RGBA" for f in frames)
-    mode = "RGBA" if has_alpha else "RGB"
-    bg = (255, 255, 255, 0) if has_alpha else (255, 255, 255)
-
-    def fit(im, w, h):
-        return im.resize((max(1, w), max(1, h)), Image.Resampling.LANCZOS)
-
+    sizes = []
+    for s_ in srcs:
+        try:
+            sizes.append(oriented_size(s_))
+        except Exception:
+            raise UserError(f"Image illisible : {os.path.basename(s_)}")
+    gap = 0
     if layout == "row":
-        H = int(min(2400, median(f.height for f in frames)))
-        parts = [fit(f, round(f.width * H / f.height), H) for f in frames]
-        canvas = Image.new(mode, (sum(p.width for p in parts), H), bg)
-        x = 0
-        for p in parts:
-            canvas.paste(p, (x, 0))
-            x += p.width
+        H = min(2400, median(h for _, h in sizes))
+        boxes = [(w * H / h, H) for w, h in sizes]
+        width, height = sum(w for w, _ in boxes), H
     elif layout == "column":
-        W = int(min(2400, median(f.width for f in frames)))
-        parts = [fit(f, W, round(f.height * W / f.width)) for f in frames]
-        canvas = Image.new(mode, (W, sum(p.height for p in parts)), bg)
-        y = 0
-        for p in parts:
-            canvas.paste(p, (0, y))
-            y += p.height
-    else:  # grid
-        import math as _math
-        n = len(frames)
+        W = min(2400, median(w for w, _ in sizes))
+        boxes = [(W, h * W / w) for w, h in sizes]
+        width, height = W, sum(h for _, h in boxes)
+    else:
+        n = len(srcs)
         cols = _math.ceil(_math.sqrt(n))
         rows = _math.ceil(n / cols)
-        cw = int(min(1200, median(f.width for f in frames)))
-        ch = int(cw * median(f.height / f.width for f in frames))
-        gap = max(4, cw // 60)
-        canvas = Image.new(mode, (cols * cw + (cols + 1) * gap,
-                                  rows * ch + (rows + 1) * gap), bg)
-        for k, f in enumerate(frames):
-            s = min(cw / f.width, ch / f.height)
-            p = fit(f, round(f.width * s), round(f.height * s))
-            r, c = divmod(k, cols)
-            x = gap + c * (cw + gap) + (cw - p.width) // 2
-            y = gap + r * (ch + gap) + (ch - p.height) // 2
-            canvas.paste(p, (x, y))
-    if max(canvas.size) > 16000:                     # JPEG and viewers have limits
-        canvas.thumbnail((16000, 16000), Image.Resampling.LANCZOS)
-    fmt = "png" if has_alpha else "jpg"
+        cw = min(1200, median(w for w, _ in sizes))
+        ch = cw * median(h / w for w, h in sizes)
+        gap = max(4, int(cw // 60))
+        width, height = cols * cw + (cols + 1) * gap, rows * ch + (rows + 1) * gap
+    k = min(1.0, 16000 / max(width, height))      # JPEG and viewers have limits
+    width, height = max(1, round(width * k)), max(1, round(height * k))
+
+    has_alpha = any(_has_alpha_hint(p) for p in srcs)
+    canvas = Image.new("RGBA" if has_alpha else "RGB", (width, height),
+                       (255, 255, 255, 0) if has_alpha else (255, 255, 255))
+    x = y = 0
+    for i, src in enumerate(srcs):
+        if ctx is not None:
+            ctx.check()
+            ctx.progress(i / (len(srcs) + 1), f"Image {i + 1} sur {len(srcs)}")
+        pic = load(src)
+        icc = pic.icc
+        im = _to_8bit(pic.to_srgb().frames[0])
+        alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
+        im = _rgb_to_srgb(im.convert("RGBA" if alpha else "RGB"),
+                          None if pic.is_cmyk else icc)
+        del pic
+        if alpha and canvas.mode == "RGB":           # header said opaque: flatten
+            flat = Image.new("RGB", im.size, (255, 255, 255))
+            flat.paste(im, mask=im.getchannel("A"))
+            im = flat
+        if layout in ("row", "column"):
+            bw, bh = boxes[i]
+            tw, th = max(1, round(bw * k)), max(1, round(bh * k))
+            im = im.resize((tw, th), Image.Resampling.LANCZOS)
+            canvas.paste(im, (x, y), im if im.mode == "RGBA" else None)
+            if layout == "row":
+                x += tw
+            else:
+                y += th
+        else:
+            r, c = divmod(i, cols)
+            cell_w, cell_h, g = cw * k, ch * k, gap * k
+            s_ = min(cell_w / im.width, cell_h / im.height)
+            im = im.resize((max(1, round(im.width * s_)), max(1, round(im.height * s_))),
+                           Image.Resampling.LANCZOS)
+            px = round(g + c * (cell_w + g) + (cell_w - im.width) / 2)
+            py = round(g + r * (cell_h + g) + (cell_h - im.height) / 2)
+            canvas.paste(im, (px, py), im if im.mode == "RGBA" else None)
+    fmt = "png" if canvas.mode == "RGBA" else "jpg"
     out = output_for(srcs[0], "assembled", new_ext=FORMATS[fmt][1])
     if ctx is not None:
         ctx.progress(len(srcs) / (len(srcs) + 1), "Assemblage")
     save(Picture([canvas]), out, fmt, quality=quality)
     return out
+
+
+def _has_alpha_hint(path: str) -> bool:
+    """Whether a picture may be transparent, from its header (cheap)."""
+    try:
+        with Image.open(path) as im:
+            return im.mode in ("RGBA", "LA", "PA") or (
+                im.mode == "P" and "transparency" in im.info)
+    except Exception:
+        return False
 
 
 def clipboard_image(src: str, max_side: int = 8000):

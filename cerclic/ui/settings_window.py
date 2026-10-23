@@ -149,9 +149,11 @@ class ShortcutEdit(QWidget):
         self.caps = KeyCaps()
         row.addWidget(self.caps, 1)
         self.change_btn = QPushButton("Modifier")
+        self.change_btn.setFocusPolicy(Qt.NoFocus)      # keep the recording focused
         self.change_btn.clicked.connect(self.toggle_recording)
         self.default_btn = QPushButton("Par défaut")
         self.default_btn.setObjectName("ghost")
+        self.default_btn.setFocusPolicy(Qt.NoFocus)
         self.default_btn.clicked.connect(self._default)
         row.addWidget(self.change_btn)
         row.addWidget(self.default_btn)
@@ -178,7 +180,7 @@ class ShortcutEdit(QWidget):
 
     def toggle_recording(self) -> None:
         if self.recording:
-            self.stop_recording()
+            self.stop_recording("Raccourci inchangé.")
         else:
             self.start_recording()
 
@@ -427,7 +429,8 @@ class SettingsWindow(QWidget):
         fl.addStretch(1)
         quit_btn = QPushButton("Quitter Cerclic")
         quit_btn.setObjectName("ghost")
-        quit_btn.setToolTip("Arrête Cerclic jusqu'au prochain démarrage de Windows")
+        quit_btn.setToolTip("Arrête Cerclic. Pour le relancer, ouvre-le depuis le Bureau "
+                            "ou le menu Démarrer.")
         quit_btn.clicked.connect(self.quit_requested.emit)
         close = QPushButton("Fermer")
         close.setObjectName("primary")
@@ -494,7 +497,9 @@ class SettingsWindow(QWidget):
 
     def _apply_hotkey_status(self, ok: bool | None) -> None:
         if not self.hotkey_on.isChecked():
-            self.shortcut.set_status("Raccourci désactivé : le clic droit reste disponible.")
+            self.shortcut.set_status(
+                "Raccourci désactivé : le clic droit « Cerclic » reste disponible."
+                if self.context_menu.isChecked() else "Raccourci désactivé.")
         elif ok is None:
             self.shortcut.set_status("")
         elif ok:

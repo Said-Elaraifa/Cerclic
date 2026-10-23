@@ -290,7 +290,7 @@ def pdf_to_text(src: str, password: str | None = None, ctx=None) -> str:
         for i, page in enumerate(doc):
             check(ctx)
             progress(ctx, i / max(1, n), f"Page {i + 1} sur {n}")
-            pages.append(page.get_text("text", sort=True).strip())
+            pages.append(page.get_text("text").strip())     # reading order
     if not any(pages):
         raise NothingToDo("Aucun texte dans ce PDF : c'est sûrement un scan (une image).")
     out = output_for(src, "text", new_ext=".txt")

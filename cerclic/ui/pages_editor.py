@@ -91,6 +91,16 @@ class PageGrid(QListWidget):
         self.setStyleSheet(f"QListWidget{{background:{BG};border:none;border-radius:10px;"
                            "padding:4px;outline:0;}")
 
+    move_requested = None        # set by the editor: fn(step)
+
+    def keyPressEvent(self, e):
+        k = e.key()
+        if e.modifiers() & Qt.ControlModifier and self.move_requested is not None and k in (
+                Qt.Key_Left, Qt.Key_Up, Qt.Key_Right, Qt.Key_Down):
+            self.move_requested(-1 if k in (Qt.Key_Left, Qt.Key_Up) else 1)
+            return
+        super().keyPressEvent(e)
+
     def order(self) -> list[tuple[int, int]]:
         return [(int(self.item(i).data(ROLE_PAGE)), int(self.item(i).data(ROLE_ROT) or 0))
                 for i in range(self.count())]
@@ -106,6 +116,7 @@ class PagesEditor(EditorWindow):
         super().__init__(os.path.basename(path), "Glisse pour trier · Suppr pour enlever")
         self.path, self.password = path, password
         self.grid = PageGrid()
+        self.grid.move_requested = self.move_selection
         self.grid.itemSelectionChanged.connect(self._sync)
         self.grid.model().rowsMoved.connect(lambda *_: self._sync())
         self.center.addWidget(self.grid)
@@ -117,10 +128,10 @@ class PagesEditor(EditorWindow):
         self.remove_btn = self.chip("Supprimer", checkable=False)
         self.remove_btn.clicked.connect(self.remove_selection)
         self.left_btn = self.chip("‹", checkable=False)
-        self.left_btn.setToolTip("Avancer (Ctrl + ←)")
+        self.left_btn.setToolTip("Vers le début (Ctrl + ←)")
         self.left_btn.clicked.connect(lambda: self.move_selection(-1))
         self.right_btn = self.chip("›", checkable=False)
-        self.right_btn.setToolTip("Reculer (Ctrl + →)")
+        self.right_btn.setToolTip("Vers la fin (Ctrl + →)")
         self.right_btn.clicked.connect(lambda: self.move_selection(1))
         for w in (self.rot_left, self.rot_right, self.remove_btn, self.left_btn,
                   self.right_btn):

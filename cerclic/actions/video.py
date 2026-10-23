@@ -299,7 +299,7 @@ def mute_video(src: str, ctx=None) -> str:
     info = probe(src)
     _need_video(info)
     if not info.has_audio:
-        raise NothingToDo("Cette vidéo n'a déjà pas de son.")
+        raise NothingToDo("Cette vidéo n'a pas de son.")
     out = output_for(src, "muted", new_ext=ext_of(src) or ".mp4")
     try:
         _run(["-i", src, "-map", "0:v", "-c", "copy", "-an", out],

@@ -780,3 +780,37 @@ def test_used_editor_survives_a_click_elsewhere(qtbot, monkeypatch):
     used._check_deactivated()
     assert hits == ["fresh"]
     w.close()
+
+
+def test_recorder_cancel_button_really_cancels(qtbot):
+    from cerclic.settings import Settings
+    from cerclic.ui.settings_window import SettingsWindow
+    w = SettingsWindow(Settings())
+    qtbot.addWidget(w)
+    w.show()
+    sc = w.shortcut
+    pauses = []
+    w.capturing.connect(pauses.append)
+    sc.start_recording()
+    qtbot.mouseClick(sc.change_btn, Qt.LeftButton)          # labelled "Annuler"
+    assert not sc.recording and pauses == [True, False]
+    assert "inchangé" in sc.status.text()
+
+
+def test_wheel_digits_on_azerty_top_row(qtbot, pdf_3p):
+    w = _wheel(qtbot, [pdf_3p])
+    with qtbot.waitSignal(w.chosen, timeout=2000) as sig:
+        qtbot.keyClick(w, Qt.Key_QuoteDbl)                 # the 3 key on AZERTY
+    assert sig.args[0] == "pdf_compress"
+
+
+def test_pages_editor_ctrl_arrows_move_pages(qtbot, pdf_3p):
+    from cerclic.ui.pages_editor import PagesEditor
+    ed = PagesEditor(pdf_3p)
+    ed.start(QPoint(400, 400))
+    ed.grid.setCurrentRow(2)
+    ed.grid.item(2).setSelected(True)
+    qtbot.keyClick(ed.grid, Qt.Key_Left, Qt.ControlModifier)
+    assert [i for i, _ in ed.grid.order()] == [0, 2, 1]
+    qtbot.keyClick(ed.grid, Qt.Key_Right, Qt.ControlModifier)
+    assert [i for i, _ in ed.grid.order()] == [0, 1, 2]

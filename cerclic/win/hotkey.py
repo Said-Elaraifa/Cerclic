@@ -10,6 +10,7 @@ refuses the ones that would get in the way of typing or of Windows itself.
 from __future__ import annotations
 
 import ctypes
+import sys
 import threading
 from ctypes import wintypes
 from typing import Callable
@@ -23,9 +24,10 @@ HOTKEY_ID = 0xC3C1
 
 DEFAULT_MODS = MOD_CONTROL | MOD_ALT
 DEFAULT_VK = VK_SPACE
+_ON_WINDOWS = sys.platform == "win32"
 
 _KEY_NAMES = {
-    0x20: "Espace", 0x09: "Tab", 0x0D: "Entrée", 0x08: "Retour", 0x2D: "Inser",
+    0x20: "Espace", 0x09: "Tab", 0x0D: "Entrée", 0x08: "Retour", 0x1B: "Échap", 0x2D: "Inser",
     0x2E: "Suppr", 0x24: "Origine", 0x23: "Fin", 0x21: "Page préc.", 0x22: "Page suiv.",
     0x25: "←", 0x26: "↑", 0x27: "→", 0x28: "↓", 0x13: "Pause", 0x2C: "Impr. écran",
     0x6A: "Pavé *", 0x6B: "Pavé +", 0x6D: "Pavé -", 0x6E: "Pavé .", 0x6F: "Pavé /",
@@ -42,8 +44,7 @@ _RESERVED = {
     (MOD_CONTROL | MOD_ALT, 0x2E): "Ctrl + Alt + Suppr est réservé à Windows.",
     (MOD_CONTROL | MOD_SHIFT, 0x1B): "Ctrl + Maj + Échap ouvre le Gestionnaire des tâches.",
 }
-_EVERYDAY = set(b"ACVXZYSFPNOWTR")   # Ctrl + these letters: copy, paste, save...
-_ALTGR_LETTERS = set(b"EQM")          # AltGr (= Ctrl + Alt) types €, @, µ with them
+_ALTGR_LETTERS = set(b"EQMOAC")       # AltGr types €, @, µ, œ, æ, © with them (AZERTY)
 
 
 def _layout_char(vk: int) -> str:
@@ -83,6 +84,36 @@ def label(mods: int, vk: int) -> str:
     return " + ".join(parts)
 
 
+def _altgr_types(vk: int, shift: bool) -> bool | None:
+    """Does AltGr (+ Maj) + this key type a character with the keyboard layout
+    in use? None when it cannot be asked (not on Windows)."""
+    try:
+        user32 = ctypes.WinDLL("user32")
+    except Exception:
+        return None
+    try:
+        user32.GetKeyboardLayout.restype = ctypes.c_void_p
+        user32.GetKeyboardLayout.argtypes = [wintypes.DWORD]
+        user32.MapVirtualKeyExW.argtypes = [wintypes.UINT, wintypes.UINT, ctypes.c_void_p]
+        user32.ToUnicodeEx.argtypes = [wintypes.UINT, wintypes.UINT,
+                                       ctypes.POINTER(ctypes.c_ubyte), wintypes.LPWSTR,
+                                       ctypes.c_int, wintypes.UINT, ctypes.c_void_p]
+        hkl = user32.GetKeyboardLayout(0)
+        state = (ctypes.c_ubyte * 256)()
+        for k in (0x11, 0x12, 0xA2, 0xA5):           # Ctrl, Alt, left Ctrl, right Alt
+            state[k] = 0x80
+        if shift:
+            state[0x10] = state[0xA0] = 0x80
+        buf = ctypes.create_unicode_buffer(8)
+        scan = user32.MapVirtualKeyExW(vk, 0, hkl)
+        n = user32.ToUnicodeEx(vk, scan, state, buf, 8, 0x4, hkl)   # 0x4: state kept
+        if n < 0:
+            return True                                # a dead key (~, `...)
+        return any(ord(ch) >= 0x20 for ch in buf.value[:n])
+    except Exception:
+        return None
+
+
 def check(mods: int, vk: int) -> str | None:
     """Why this combination should not be used, or None if it is fine."""
     mods &= MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_WIN
@@ -91,19 +122,31 @@ def check(mods: int, vk: int) -> str | None:
     if (mods, vk) in _RESERVED:
         return _RESERVED[(mods, vk)]
     is_f_key = 0x70 <= vk <= 0x87
-    if is_f_key and not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) and (
-            vk <= 0x75 or 0x79 <= vk <= 0x7B):
-        return (f"{key_name(vk)} sert déjà dans Windows (aide, renommer, actualiser, "
-                "plein écran…). Ajoute Ctrl, Alt ou Win, ou prends F7, F8, F9.")
-    if not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) and not is_f_key:
+    if is_f_key:
+        if not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) and (vk <= 0x75 or 0x79 <= vk <= 0x7B):
+            return (f"{key_name(vk)} sert déjà dans Windows (aide, renommer, actualiser, "
+                    "plein écran…). Ajoute Ctrl, Alt ou Win, ou prends F7, F8, F9.")
+        return None
+    if 0x60 <= vk <= 0x69 and mods & MOD_ALT and not mods & (MOD_CONTROL | MOD_WIN):
+        return ("Alt avec le pavé numérique sert à taper des caractères "
+                "(Alt + 0201 = É). Choisis une autre combinaison.")
+    if not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN):
         return ("Il faut Ctrl, Alt ou Win dans la combinaison (sinon cette touche "
                 "ne s'écrirait plus).")
-    if mods == MOD_CONTROL and vk in _EVERYDAY:
-        return f"Ctrl + {chr(vk)} sert déjà partout (copier, coller, enregistrer…)."
-    if mods == MOD_CONTROL | MOD_ALT and (0x30 <= vk <= 0x39 or vk >= 0xBA
-                                          or vk in _ALTGR_LETTERS):
-        return ("Cette combinaison sert à taper des caractères (@, €, #…) avec "
-                "AltGr. Choisis-en une autre.")
+    if mods & MOD_WIN:
+        pass                                           # Win + key: Windows says if taken
+    elif bin(mods).count("1") < 2:
+        name = "Ctrl" if mods & MOD_CONTROL else "Alt"
+        return (f"{name} + une seule touche sert déjà dans beaucoup d'applications "
+                "(gras, copier, menus…). Ajoute Maj ou une autre touche, par exemple "
+                f"{name} + Maj + {key_name(vk)}.")
+    if mods & MOD_CONTROL and mods & MOD_ALT and not mods & MOD_WIN:
+        typed = _altgr_types(vk, bool(mods & MOD_SHIFT)) if _ON_WINDOWS else None
+        if typed is None:
+            typed = 0x30 <= vk <= 0x39 or vk >= 0xBA or vk in _ALTGR_LETTERS
+        if typed:
+            return ("Cette combinaison sert à taper des caractères (@, €, #, œ…) avec "
+                    "AltGr. Choisis-en une autre.")
     return None
 
 

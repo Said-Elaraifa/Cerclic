@@ -909,3 +909,44 @@ def test_probe_reads_phone_rotation(monkeypatch):
     monkeypatch.setattr(video, "ffmpeg_path", lambda: "ffmpeg")
     info = video.probe("x.mp4")
     assert (info.width, info.height) == (1080, 1920) and info.has_audio
+
+
+def test_assemble_converts_colours_to_srgb(tmp_path):
+    import io
+    from PIL import ImageCms
+    srgb = ImageCms.createProfile("sRGB")
+    lab_like = ImageCms.ImageCmsProfile(srgb).tobytes()
+    a = tmp_path / "a.jpg"
+    b = tmp_path / "b.jpg"
+    Image.new("RGB", (100, 80), (200, 30, 30)).save(a, icc_profile=lab_like)
+    Image.new("RGB", (100, 80), (30, 30, 200)).save(b)
+    out = _ok(engine.run("img_assemble", [str(a), str(b)], {"layout": "row"}))[0]
+    with Image.open(out) as im:
+        r, g, bl = im.getpixel((10, 10))
+        assert r > 150 and g < 80                     # red stays red
+
+
+def test_anonymise_png_with_orientation_is_written_upright(tmp_path):
+    ex = Image.Exif()
+    ex[0x0112] = 6
+    ex[0x010F] = "PhoneMaker"
+    png = tmp_path / "turned.png"
+    Image.new("RGB", (300, 200), (5, 6, 7)).save(png, exif=ex.tobytes())
+    out = _ok(engine.run("img_clean", [str(png)], {}))[0]
+    with Image.open(out) as im:
+        assert im.size == (200, 300)                  # as it was shown
+        assert not im.getexif().get(0x010F)
+
+
+def test_pdf_text_keeps_columns_in_reading_order(tmp_path):
+    src = tmp_path / "deux colonnes.pdf"
+    with pymupdf.open() as d:
+        page = d.new_page()
+        for k in range(1, 6):
+            page.insert_text((50, 80 + k * 40), f"Gauche {k}", fontsize=11)
+        for k in range(1, 6):
+            page.insert_text((320, 80 + k * 40), f"Droite {k}", fontsize=11)
+        d.save(str(src))
+    out = _ok(engine.run("pdf_text", [str(src)], {}))[0]
+    text = open(out, encoding="utf-8-sig").read()
+    assert text.index("Gauche 5") < text.index("Droite 1")

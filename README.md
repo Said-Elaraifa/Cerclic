@@ -35,7 +35,7 @@ et « Annuler » sur la carte de résultat le supprime.
 compresser, convertir en JPG, PNG ou WEBP, copier pour coller où tu veux,
 réunir en un PDF, assembler plusieurs images en une (côte à côte, en colonne,
 en grille), anonymiser (retirer la position GPS, le modèle du téléphone, la
-date… sans perte de qualité).
+date… sans aucune perte de qualité pour les JPG et PNG).
 
 **PDF** : signer (tu dessines ta signature une fois, puis tu la poses à la
 souris), rogner, compresser, fusionner, organiser les pages (trier, tourner,
