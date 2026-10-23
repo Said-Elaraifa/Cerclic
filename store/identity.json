@@ -1,9 +1,9 @@
 {
   "_aide": "Les trois valeurs de « store » viennent de Partner Center : ton application, Gestion des produits, Identité du produit. Copie-les telles quelles (Package/Identity/Name, Package/Identity/Publisher, Package/Properties/PublisherDisplayName), puis relance scripts/store/build.py.",
   "store": {
-    "Name": "",
-    "Publisher": "",
-    "PublisherDisplayName": ""
+    "Name": "Jannah.Cerclic",
+    "Publisher": "CN=6589E4D0-AE06-4B33-A73B-E64165EF2D21",
+    "PublisherDisplayName": "Jannah"
   },
   "test": {
     "Name": "Cerclic.Test",
