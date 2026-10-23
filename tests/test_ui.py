@@ -399,8 +399,11 @@ def test_shortcut_recorder(qtbot):
     assert Settings.load().get("hotkey_vk") == hk.DEFAULT_VK
 
 
-def test_hotkey_rules():
+def test_hotkey_rules(monkeypatch):
     from cerclic.win import hotkey as hk
+    # the AZERTY rules: on Windows, Cerclic asks the keyboard layout in use
+    # instead (a US layout types nothing with AltGr + 0)
+    monkeypatch.setattr(hk, "_altgr_types", lambda vk, shift: None)
     assert hk.label(hk.DEFAULT_MODS, hk.DEFAULT_VK) == "Ctrl + Alt + Espace"
     assert hk.check(hk.DEFAULT_MODS, hk.DEFAULT_VK) is None
     assert hk.check(hk.MOD_CONTROL | hk.MOD_SHIFT, 0x58) is None      # Ctrl+Maj+X

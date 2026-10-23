@@ -16,6 +16,10 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # Qt's offscreen platform finds no font on Windows without it (tests and
+      # Store screenshots would get wider, box-like text)
+      QT_QPA_FONTDIR: C:\Windows\Fonts
     steps:
       - uses: actions/checkout@v4
 
