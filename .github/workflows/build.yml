@@ -152,10 +152,11 @@ jobs:
         run: |
           $makeappx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe |
             Where-Object { $_.FullName -match "\\x64\\" } | Sort-Object FullName | Select-Object -Last 1
-          if (-not $makeappx) { Write-Host "makeappx absent du runner : vérification sautée"; exit 0 }
+          if (-not $makeappx) { Write-Host "::warning::makeappx absent du runner : verification sautee"; exit 0 }
           foreach ($pkg in Get-ChildItem dist_store/*.msix) {
             & $makeappx.FullName unpack /p $pkg.FullName /d "unpacked\$($pkg.BaseName)" /o
             if ($LASTEXITCODE -ne 0) { throw "makeappx refuse $($pkg.Name)" }
+            Write-Host "::notice::makeappx accepte $($pkg.Name)"
           }
 
       - name: Upload artifacts
