@@ -66,6 +66,11 @@ def test_mac_hotkey_reports_failure_without_carbon(monkeypatch):
 
 # ----- Quick Action and opening at login -------------------------------------------------------
 
+# Paths and shells as on a Mac: these run on the Mac job of the workflow,
+# not under Windows (backslashes, %USERPROFILE%, no /bin/sh).
+MAC_PATHS = pytest.mark.skipif(os.name == "nt", reason="chemins macOS : job Mac")
+
+
 @pytest.fixture
 def mac_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
@@ -75,6 +80,7 @@ def mac_home(tmp_path, monkeypatch):
     return home
 
 
+@MAC_PATHS
 def test_quick_action_files(mac_home):
     app = "/Applications/Cerclic d'Ali.app"           # a quote and a space in the path
     assert integration.install_quick_action(app) is True
@@ -97,6 +103,7 @@ def test_quick_action_files(mac_home):
     assert not integration.quick_action_installed()
 
 
+@MAC_PATHS
 def test_quick_action_script_passes_every_file(mac_home, tmp_path):
     """The script, run with a stand-in for `open`: the app path survives its
     quote and space, every selected file arrives as one argument."""
@@ -127,6 +134,7 @@ def test_finder_selection_script():
         assert "{" not in s and "(get selection)" in s
 
 
+@MAC_PATHS
 def test_login_item(mac_home):
     integration.set_autostart(True, app="/Applications/Cerclic.app")
     plist = plistlib.loads(open(integration.launch_agent_path(), "rb").read())
@@ -139,6 +147,7 @@ def test_login_item(mac_home):
     assert not integration.is_autostart()
 
 
+@MAC_PATHS
 def test_nothing_installed_from_the_sources(mac_home):
     assert integration.app_bundle() is None            # not the packaged app
     assert integration.install_quick_action() is False
@@ -177,6 +186,7 @@ def test_files_sent_by_macos_open_one_wheel(qtbot, jpg_photo, png_with_alpha):
 
 # ----- settings on a Mac -------------------------------------------------------------------------------
 
+@MAC_PATHS
 def test_settings_window_as_on_a_mac(qtbot, monkeypatch, tmp_path):
     from cerclic import settings as settings_mod
     from cerclic.ui import settings_window as sw

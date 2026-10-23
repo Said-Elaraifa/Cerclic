@@ -76,8 +76,9 @@ jobs:
           if ($code -ne 0) {
             Select-String -Path pytest.txt -Pattern '^(FAILED|ERROR) ' | Select-Object -First 5 |
               ForEach-Object { Write-Host "::error::$($_.Line.Replace('%','%25'))" }
-            Select-String -Path pytest.txt -Pattern ':\d+: ' | Select-Object -First 4 |
+            Select-String -Path pytest.txt -Pattern ':\d+: ' | Select-Object -First 3 |
               ForEach-Object { Write-Host "::error::$($_.Line.Replace('%','%25'))" }
+            Write-Host "::error::$((Get-Content pytest.txt -Tail 1).Replace('%','%25'))"
             exit $code
           }
 
@@ -147,6 +148,23 @@ jobs:
 
       - name: Build Cerclic.app and the disk image (with its self-test)
         run: bash scripts/build_mac.sh --no-install --no-open
+
+      - name: Mac tests (Quick Action, login item, settings, on a real Mac)
+        env:
+          PYTHONPATH: .
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          .outils/bin/uv pip install --python .outils/venv/bin/python pytest==9.1.1 pytest-qt==4.5.0
+          set +e
+          .outils/venv/bin/python -m pytest -q -rfE --tb=line tests/test_mac.py > pytest.txt 2>&1
+          code=$?
+          cat pytest.txt
+          if [ $code -ne 0 ]; then
+            grep -E '^(FAILED|ERROR) ' pytest.txt | head -5 | sed 's/%/%25/g; s/^/::error::/'
+            grep -E ':[0-9]+: ' pytest.txt | head -3 | sed 's/%/%25/g; s/^/::error::/'
+            tail -1 pytest.txt | sed 's/%/%25/g; s/^/::error::/'
+          fi
+          exit $code
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
