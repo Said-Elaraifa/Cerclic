@@ -116,12 +116,24 @@ def test_quick_action_script_passes_every_file(mac_home, tmp_path):
     assert record.read_text().splitlines() == ["-a", app, *files]
 
 
+def test_finder_selection_script():
+    """The shortcut reads the Finder's selection when the Finder is in front,
+    or, when Cerclic's own window is (clicked after choosing the files), whatever
+    application the Finder is behind."""
+    from cerclic.mac import selection
+    assert 'if not frontmost then return ""' in selection.script(True)
+    assert "frontmost" not in selection.script(False)
+    for s in (selection.script(True), selection.script(False)):
+        assert "{" not in s and "(get selection)" in s
+
+
 def test_login_item(mac_home):
     integration.set_autostart(True, app="/Applications/Cerclic.app")
     plist = plistlib.loads(open(integration.launch_agent_path(), "rb").read())
-    assert plist["ProgramArguments"][:4] == ["/usr/bin/open", "-g", "-a",
-                                             "/Applications/Cerclic.app"]
-    assert plist["ProgramArguments"][-1] == "--background" and plist["RunAtLoad"]
+    # Cerclic itself, so that macOS's background notice names Cerclic, not « open »
+    assert plist["ProgramArguments"] == ["/Applications/Cerclic.app/Contents/MacOS/Cerclic",
+                                         "--background"]
+    assert plist["RunAtLoad"] and plist["AssociatedBundleIdentifiers"] == [integration.BUNDLE_ID]
     assert integration.is_autostart()
     integration.cleanup()
     assert not integration.is_autostart()

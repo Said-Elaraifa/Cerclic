@@ -3,7 +3,7 @@
 ; The version is passed with /DMyAppVersion=x.y.z.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.7.0"
+  #define MyAppVersion "0.7.1"
 #endif
 
 #define MyAppName "Cerclic"

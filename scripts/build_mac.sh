@@ -117,14 +117,20 @@ say "Vérification de Cerclic.app"
 VERSION="$("$PY" -c 'import re; print(re.search(r"__version__ = \"([^\"]+)\"", open("cerclic/__init__.py").read()).group(1))')"
 DMG="$ROOT/dist/Cerclic-$VERSION-mac-$ARCH.dmg"
 say "Image disque à partager : dist/$(basename "$DMG")"
-STAGE="$ROOT/build/mac-dmg"
-rm -rf "$STAGE"
-mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/Cerclic.app"
-ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
-hdiutil create -quiet -volname "Cerclic" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-rm -rf "$STAGE"
+# La fenêtre qui s'ouvre montre quoi faire : glisser Cerclic dans Applications,
+# puis la marche à suivre la première fois (scripts/mac_dmg.py).
+if ! "$PY" -m dmgbuild -s scripts/mac_dmg.py -D app="$APP" \
+     -D background="$ROOT/assets/dmg/fond.png" "Cerclic" "$DMG"; then
+  echo "(fenêtre décorée impossible : image disque simple)"
+  STAGE="$ROOT/build/mac-dmg"
+  rm -rf "$STAGE" "$DMG"
+  mkdir -p "$STAGE"
+  ditto "$APP" "$STAGE/Cerclic.app"
+  ln -s /Applications "$STAGE/Applications"
+  hdiutil create -quiet -volname "Cerclic" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+  rm -rf "$STAGE"
+fi
 
 # ----- 4. installation ----------------------------------------------------------------------------
 if [ $INSTALL = 1 ]; then

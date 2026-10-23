@@ -686,13 +686,17 @@ class CerclicApp(QObject):
         n = self._reads
         self._reading_selection = n
         self._reading_since = time.monotonic()
+        # macOS: with Cerclic's own window in front (clicked after choosing the
+        # files), the Finder's selection still counts
+        cerclic_in_front = IS_MAC and QApplication.applicationState() == Qt.ApplicationActive
+        log("raccourci : lecture de la sélection")
 
         def read():
             try:
                 if IS_MAC:
                     from .mac.selection import NotAllowed, finder_selection
                     try:
-                        paths = finder_selection()
+                        paths = finder_selection(finder_in_front=not cerclic_in_front)
                     except NotAllowed:
                         self.bridge.finder_refused.emit(n)
                         return

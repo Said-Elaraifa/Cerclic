@@ -211,7 +211,9 @@ def set_autostart(enabled: bool, app: str | None = None) -> None:
     _write_if_changed(path, plistlib.dumps({
         "Label": BUNDLE_ID,
         "AssociatedBundleIdentifiers": [BUNDLE_ID],   # listed as Cerclic in Login Items
-        "ProgramArguments": ["/usr/bin/open", "-g", "-a", app, "--args", "--background"],
+        # Cerclic itself, not /usr/bin/open: macOS names the program in its
+        # « activité en arrière-plan » notice, which then says « Cerclic »
+        "ProgramArguments": [os.path.join(app, "Contents", "MacOS", "Cerclic"), "--background"],
         "RunAtLoad": True,
         "LimitLoadToSessionType": "Aqua",
         "ProcessType": "Interactive",
