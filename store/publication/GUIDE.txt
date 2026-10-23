@@ -1,0 +1,110 @@
+﻿CERCLIC SUR LE MICROSOFT STORE : LE GUIDE
+
+Pourquoi le Store : plus aucun avertissement SmartScreen, une installation en
+un clic, des mises à jour automatiques, et Microsoft signe Cerclic gratuitement.
+Compte développeur gratuit pour une personne seule.
+
+------------------------------------------------------------------------------
+1. ESSAYER LA VERSION STORE SUR TON PC (10 minutes, Windows 11)
+------------------------------------------------------------------------------
+Dézippe Cerclic-0.7.0-test.zip et suis son LISEZ-MOI.txt. C'est exactement le
+paquet qui partira sur le Store, sous un nom de test. Désinstalle-le une fois
+l'essai fini.
+
+------------------------------------------------------------------------------
+2. CRÉER TON COMPTE DÉVELOPPEUR (gratuit)
+------------------------------------------------------------------------------
+- Va sur https://storedeveloper.microsoft.com
+- Connecte-toi avec ton compte Microsoft personnel (celui de Windows convient).
+- Choisis « Particulier » (individual), puis suis les étapes : Microsoft vérifie
+  ton identité avec une photo de ta pièce d'identité et un selfie.
+- Une fois vérifié, tu arrives dans Partner Center.
+
+------------------------------------------------------------------------------
+3. RÉSERVER LE NOM « Cerclic »
+------------------------------------------------------------------------------
+Partner Center, « Applications et jeux », « Nouveau produit », « Application
+MSIX ou PWA ». Tape Cerclic, « Vérifier la disponibilité », puis « Réserver le
+nom du produit ». (Une réservation dure 3 mois si rien n'est publié.)
+
+------------------------------------------------------------------------------
+4. M'ENVOYER TROIS VALEURS
+------------------------------------------------------------------------------
+Dans Cerclic, à gauche : « Gestion des produits », « Identité du produit ».
+Copie-moi ces trois lignes, telles quelles :
+  Package/Identity/Name
+  Package/Identity/Publisher            (commence par CN=)
+  Package/Properties/PublisherDisplayName
+Je fabrique alors Cerclic-0.7.0.msix, le fichier à envoyer au Store
+(il porte ton identité : c'est pour ça qu'il faut ces valeurs).
+
+------------------------------------------------------------------------------
+À DÉCIDER AVANT DE SOUMETTRE : LE CODE SOURCE
+------------------------------------------------------------------------------
+Cerclic contient PyMuPDF (son moteur PDF), sous licence AGPL : dès que
+Cerclic est diffusé au public, même gratuitement, son code source doit être
+accessible à ceux qui l'installent. Deux possibilités :
+  - rendre public ton dépôt GitHub Cerclic (gratuit, le plus simple) : je
+    mets alors le lien du code dans Cerclic (Réglages, À propos) ;
+  - ou acheter à Artifex une licence commerciale de PyMuPDF (le code reste
+    privé).
+
+------------------------------------------------------------------------------
+5. REMPLIR LA SOUMISSION (« Démarrer votre soumission »)
+------------------------------------------------------------------------------
+Tous les textes à copier sont dans FICHE-STORE.txt.
+
+Tarification et disponibilité
+  - Marchés : tous (ou seulement les pays francophones, à toi de voir).
+  - Prix de base : Gratuit (tu pourras changer plus tard).
+  - Visibilité : publique, visible dans le Store.
+
+Propriétés
+  - Catégorie : Productivité.
+  - Données personnelles : réponds que Cerclic n'en collecte pas et n'en
+    envoie pas. L'adresse d'une politique de confidentialité devient alors
+    facultative, mais Microsoft peut la demander quand même à une application
+    de bureau : le plus sûr est d'en mettre une. Le texte est prêt dans
+    CONFIDENTIALITE.txt : complète la ligne Contact, publie-le sur ton site,
+    puis colle l'adresse de la page.
+  - Coordonnées d'assistance : une adresse e-mail ou ton site.
+
+Classifications par âge
+  - Questionnaire IARC : type « application » (pas un jeu), catégorie
+    utilitaire ou productivité. Réponds « Non » à tout : pas de violence, pas
+    d'échanges entre utilisateurs, pas d'achats, pas de partage de position,
+    pas d'accès libre à Internet. Résultat attendu : tout public (3+).
+
+Packages
+  - Glisse Cerclic-0.7.0.msix. Partner Center le vérifie tout de suite.
+  - Famille d'appareils : Windows 10/11 Desktop (coché d'office).
+
+Descriptions du Store (langue : français, France)
+  - Description, Nouveautés, Fonctionnalités, et dans « Champs
+    supplémentaires » la Description courte : dans FICHE-STORE.txt.
+  - Captures d'écran : les 5 images du dossier captures, dans l'ordre, avec
+    leurs légendes (captures/legendes.txt). Tu peux aussi faire les tiennes sur
+    ton PC (Windows + Maj + S), en 1366 x 768 ou plus grand.
+  - Logos du Store, « Icône de vignette d'application 1:1 (300 x 300) » :
+    icone-300x300.png.
+
+Options de soumission
+  - Capacités restreintes : Partner Center demande pourquoi Cerclic utilise
+    « runFullTrust ». Colle la justification de FICHE-STORE.txt (en anglais,
+    pour l'équipe de certification).
+  - Notes pour la certification : colle les notes de FICHE-STORE.txt.
+
+Puis « Soumettre au Store ». La certification prend de quelques heures à
+quelques jours. Tu reçois un e-mail, et Cerclic apparaît sur le Store.
+
+------------------------------------------------------------------------------
+6. ENSUITE
+------------------------------------------------------------------------------
+- Sur ton PC : installe Cerclic depuis le Store et ouvre-le une fois (il
+  reprend tes réglages et ta signature), puis désinstalle l'ancienne version :
+  Cerclic te le propose et te montre le bouton.
+- Le lien de ta page Store est dans « Identité du produit » (lien de la fiche
+  du Store) : mets-le sur ton site à la place de l'installateur.
+- Mises à jour : je fabrique un nouveau .msix (même identité, version plus
+  haute), tu crées une nouvelle soumission, tu remplaces le paquet. Les
+  utilisateurs la reçoivent automatiquement.

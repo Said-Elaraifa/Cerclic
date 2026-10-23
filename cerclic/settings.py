@@ -31,11 +31,19 @@ DEFAULTS: dict = {
 # Keys from older versions (gesture, hold_ms...) are dropped on load.
 
 
+def is_packaged() -> bool:
+    """The Microsoft Store version (an MSIX package)."""
+    if os.name != "nt" and not os.environ.get("CERCLIC_TEST_PACKAGE_FAMILY"):
+        return False
+    from .win.package import is_packaged as packaged
+    return packaged()
+
+
 def is_portable() -> bool:
     """The portable version of Windows (unzipped anywhere): no uninstaller beside
     it. Never on macOS: nothing is written into Cerclic.app (that would break
-    its signature)."""
-    if not getattr(sys, "frozen", False) or _MAC:
+    its signature). Never from the Microsoft Store either."""
+    if not getattr(sys, "frozen", False) or _MAC or is_packaged():
         return False
     return not os.path.exists(os.path.join(os.path.dirname(sys.executable),
                                            "unins000.exe"))
@@ -63,6 +71,9 @@ def _portable_data() -> str | None:
 
 
 def config_dir() -> str:
+    if is_packaged():           # the package's own folder, seen by every program
+        from .win.package import local_state
+        return local_state()
     if os.name == "nt":
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
     elif _MAC:
@@ -82,6 +93,42 @@ def config_dir() -> str:
 
 def config_path() -> str:
     return os.path.join(config_dir(), "settings.json")
+
+
+def import_classic_settings() -> bool:
+    """Microsoft Store version, first start: begin with the choices made in the
+    classic version installed before (signature included)."""
+    if not is_packaged() or os.path.exists(config_path()):
+        return False
+    from .win.package import classic_settings
+    src = classic_settings()
+    if not src:
+        return False
+    try:
+        with open(src, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    sig = data.get("signature")
+    if isinstance(sig, str) and sig:
+        inside = os.path.normcase(os.path.dirname(os.path.abspath(sig))) == \
+            os.path.normcase(os.path.dirname(os.path.abspath(src)))
+        if inside:
+            try:
+                new = os.path.join(config_dir(), os.path.basename(sig))
+                with open(sig, "rb") as fi, open(new, "wb") as fo:
+                    fo.write(fi.read())
+                data["signature"] = new
+            except OSError:
+                data["signature"] = ""
+    # Windows 11's full menu is not needed here (the entry is in the short
+    # menu), and the welcome shows what changed.
+    for key in ("classic_menu", "classic_menu_by_cerclic", "welcome_shown"):
+        data.pop(key, None)
+    Settings(data).save()
+    return True
 
 
 class Settings:

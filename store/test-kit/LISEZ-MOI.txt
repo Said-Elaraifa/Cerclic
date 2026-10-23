@@ -1,0 +1,37 @@
+﻿CERCLIC, VERSION MICROSOFT STORE : ESSAI AVANT PUBLICATION
+
+Ce dossier contient le paquet que le Microsoft Store va publier, sous un nom
+de test (« Cerclic (test) »), pour l'essayer sur ton PC avant l'envoi.
+Il faut Windows 11.
+
+1. Si l'ancienne version de Cerclic tourne, quitte-la (icône près de
+   l'horloge, Quitter), mais garde-la installée : « Cerclic (test) » reprend
+   tes réglages et ta signature, et tu retrouves l'ancienne version après
+   l'essai. « Cerclic (test) » te signalera qu'elle est installée : c'est
+   normal pendant l'essai, ne la désinstalle pas.
+
+2. Double-clique « Installer Cerclic test.cmd » et accepte la demande
+   d'administrateur (Windows l'exige pour un paquet non signé, seulement pour
+   ce test : la version du Store s'installe sans rien demander).
+
+3. Ouvre « Cerclic (test) » une fois depuis le menu Démarrer.
+
+À vérifier :
+- Clic droit sur une image, un PDF ou une vidéo : « Cerclic » est dans le
+  menu, sans passer par « Afficher d'autres options ». Il ouvre la roue.
+- Avec plusieurs fichiers sélectionnés : une seule roue, avec tous les fichiers.
+- Quitte Cerclic (icône près de l'horloge, Quitter), puis clic droit,
+  « Cerclic » : il redémarre et ouvre la roue.
+- Le raccourci (Ctrl + Alt + Espace) sur des fichiers sélectionnés.
+- Réglages, Clic droit : en le désactivant, l'entrée disparaît du menu.
+- Réglages, Général, « Lancer Cerclic avec Windows » : ferme ta session puis
+  rouvre-la, Cerclic (test) doit être là (l'ancienne version démarre aussi,
+  quitte-la pour essayer le raccourci).
+- Les logos : menu Démarrer, barre des tâches (fenêtre des réglages ouverte).
+
+4. Pour l'enlever : « Desinstaller Cerclic test.cmd ». À faire avant
+   d'installer Cerclic depuis le Microsoft Store. Ton ancienne version reste
+   là : relance-la depuis le menu Démarrer (Cerclic).
+
+Un souci ? Envoie à Claude une capture, ou le journal : Réglages, À propos,
+Journal, Ouvrir.

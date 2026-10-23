@@ -1,0 +1,26 @@
+#include <winver.h>
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 0,7,0,0
+PRODUCTVERSION 0,7,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_DLL
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040C04B0"
+    BEGIN
+      VALUE "CompanyName", "Said El Araifa"
+      VALUE "FileDescription", "Cerclic, menu du clic droit"
+      VALUE "FileVersion", "0.7.0"
+      VALUE "InternalName", "CerclicMenu"
+      VALUE "LegalCopyright", "MIT"
+      VALUE "OriginalFilename", "CerclicMenu.dll"
+      VALUE "ProductName", "Cerclic"
+      VALUE "ProductVersion", "0.7.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x040C, 1200
+  END
+END

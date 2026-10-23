@@ -477,11 +477,13 @@ class SettingsWindow(QWidget):
     uninstall_requested = Signal()   # macOS: take Cerclic out of the Finder and login
 
     def __init__(self, settings: Settings, windows_11: bool = False,
-                 welcome: bool = False, classic_enabled: bool = False):
+                 welcome: bool = False, classic_enabled: bool = False,
+                 store: bool = False):
         super().__init__(None, Qt.Window)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.s = settings
         self.windows_11 = windows_11
+        self.store = store                # the Microsoft Store version
         self.setWindowTitle("Cerclic")
         from .logo import make_icon
         self.setWindowIcon(make_icon(64))
@@ -510,7 +512,7 @@ class SettingsWindow(QWidget):
         names = QVBoxLayout()
         names.setSpacing(0)
         names.addWidget(label("Cerclic", "row"))
-        names.addWidget(label(f"Version {__version__}", "faint"))
+        names.addWidget(label(self._version_text(), "faint"))
         brand.addLayout(names, 1)
         sl.addLayout(brand)
         self.nav: dict[str, NavItem] = {}
@@ -564,6 +566,9 @@ class SettingsWindow(QWidget):
         self.backdrop.lower()
         super().resizeEvent(e)
 
+    def _version_text(self) -> str:
+        return f"Version {__version__}" + (" · Microsoft Store" if self.store else "")
+
     # -- Général -----------------------------------------------------------------------
     def _how_keyboard(self) -> str:
         return (f"Sélectionne un ou plusieurs fichiers dans {FILES_APP} ou sur le Bureau, "
@@ -574,7 +579,8 @@ class SettingsWindow(QWidget):
 
     def _build_general(self, welcome: bool, win11_menu: bool) -> None:
         page = self._page("general", "Général",
-                          "Trois façons d'ouvrir la roue, et le démarrage.")
+                          ("Deux" if self.store else "Trois")
+                          + " façons d'ouvrir la roue, et le démarrage.")
         if welcome:
             where = ("dans la barre des menus, en haut de l'écran" if IS_MAC else
                      "près de l'horloge (parfois cachée sous la petite flèche ^)")
@@ -595,9 +601,10 @@ class SettingsWindow(QWidget):
             mouse = "Clic droit sur le fichier, puis « Cerclic »."
         self.way_mouse = ways.add(_Way("mouse", "#0EA5B7", "À la souris", mouse, link=True))
         self.way_mouse.opened.connect(lambda: self.show_page("menu"))
-        ways.add(_Way("drop", "#7A8497", "En glissant",
-                      "Glisse des fichiers sur l'icône de Cerclic"
-                      + (" (dans Applications ou le Dock)." if IS_MAC else ".")))
+        if not self.store:          # (no icon to drop files on: Start opens the app)
+            ways.add(_Way("drop", "#7A8497", "En glissant",
+                          "Glisse des fichiers sur l'icône de Cerclic"
+                          + (" (dans Applications ou le Dock)." if IS_MAC else ".")))
         page.add(group_block(ways))
 
         start = Group("Démarrage")
@@ -611,6 +618,7 @@ class SettingsWindow(QWidget):
         quit_btn = _button("Quitter Cerclic", "",
                            "Arrête Cerclic. Pour le relancer, ouvre-le depuis "
                            + ("le dossier Applications." if IS_MAC else
+                              "le menu Démarrer." if self.store else
                               "le Bureau ou le menu Démarrer."))
         quit_btn.clicked.connect(self.quit_requested.emit)
         start.add(Row("Arrêter Cerclic", "La roue ne s'ouvrira plus jusqu'au prochain "
@@ -683,6 +691,10 @@ class SettingsWindow(QWidget):
             g.add(Row("« Cerclic » dans le clic droit du Finder",
                       "Dans le menu Actions rapides de tes fichiers, dans le Finder et sur "
                       "le Bureau.", self.context_menu))
+        elif self.store:
+            g.add(Row("« Cerclic » dans le clic droit des fichiers",
+                      "En haut du menu des images, PDF, vidéos et sons, dans "
+                      "l'Explorateur et sur le Bureau.", self.context_menu))
         else:
             g.add(Row("« Cerclic » dans le clic droit des fichiers",
                       "Sur les images, PDF, vidéos et sons, dans l'Explorateur, sur le "
@@ -888,7 +900,7 @@ class SettingsWindow(QWidget):
         texts = QVBoxLayout()
         texts.setSpacing(3)
         texts.addWidget(label("Cerclic", "title"))
-        texts.addWidget(label(f"Version {__version__}", "desc"))
+        texts.addWidget(label(self._version_text(), "desc"))
         texts.addWidget(label("Rogner, signer, compresser, convertir, mettre au format "
                               "des réseaux sociaux… en un geste, sans ouvrir d'autre "
                               "application.", "desc"))
@@ -994,6 +1006,13 @@ class SettingsWindow(QWidget):
             self.shortcut.set_status(f"{OS_NAME} ou une autre application utilise déjà "
                                      "cette combinaison. Choisis-en une autre avec "
                                      "« Modifier ».", "error")
+
+    def set_autostart(self, on: bool) -> None:
+        """What Windows says about starting with it (Microsoft Store version:
+        the user may also change it in Task Manager)."""
+        self.autostart.blockSignals(True)
+        self.autostart.setChecked(on)
+        self.autostart.blockSignals(False)
 
     def classic_choice(self) -> bool | None:
         return None if self.classic is None else self.classic.isChecked()

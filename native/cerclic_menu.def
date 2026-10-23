@@ -1,0 +1,4 @@
+LIBRARY CerclicMenu
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

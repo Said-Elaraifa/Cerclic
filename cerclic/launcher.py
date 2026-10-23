@@ -19,6 +19,18 @@ import time
 PROTOCOL = "CERCLIC/1"
 COMMANDS = {"open", "hello", "background", "settings", "quit"}
 RESIDENT_MUTEX = "Local\\Cerclic.Resident"
+STORE_MUTEX = "Local\\CerclicStore.Resident"
+
+
+def _store() -> bool:
+    """The Microsoft Store version has its own pipe and lock: if the classic
+    version is installed too, each runs apart (and the Store one says so)."""
+    from .settings import is_packaged
+    return is_packaged()
+
+
+def resident_mutex() -> str:
+    return STORE_MUTEX if _store() else RESIDENT_MUTEX
 
 
 # ----- naming ------------------------------------------------------------------
@@ -38,7 +50,8 @@ def session_tag() -> str:
 
 def server_name() -> str:
     """Name for QLocalServer; on Windows the pipe is \\\\.\\pipe\\<name>."""
-    return os.environ.get("CERCLIC_SERVER_NAME") or f"Cerclic-{session_tag()}"
+    base = "CerclicStore" if _store() else "Cerclic"
+    return os.environ.get("CERCLIC_SERVER_NAME") or f"{base}-{session_tag()}"
 
 
 # ----- arguments and messages ----------------------------------------------------
@@ -202,7 +215,7 @@ class ResidentLock:
             k32 = ctypes.WinDLL("kernel32", use_last_error=True)
             k32.CreateMutexW.restype = ctypes.c_void_p
             k32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
-            self.handle = k32.CreateMutexW(None, 0, RESIDENT_MUTEX)
+            self.handle = k32.CreateMutexW(None, 0, resident_mutex())
             self.already = ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
         else:
             import fcntl
@@ -221,7 +234,7 @@ def resident_running() -> bool:
         k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         k32.OpenMutexW.restype = ctypes.c_void_p
         k32.OpenMutexW.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_wchar_p]
-        h = k32.OpenMutexW(0x00100000, 0, RESIDENT_MUTEX)   # SYNCHRONIZE
+        h = k32.OpenMutexW(0x00100000, 0, resident_mutex())   # SYNCHRONIZE
         if h:
             k32.CloseHandle(ctypes.c_void_p(h))
             return True
@@ -249,9 +262,27 @@ def wait_resident_exit(timeout: float) -> bool:
 
 # ----- main ------------------------------------------------------------------------------
 
+def take_open_list(argv: list[str]) -> tuple[list[str], list[str] | None]:
+    """--open-list FILE: the files sent by the right-click entry of the
+    Microsoft Store version when it had to start Cerclic (see win/package.py).
+    Returns the other arguments and those files (None without the option)."""
+    if "--open-list" not in argv:
+        return argv, None
+    i = argv.index("--open-list")
+    rest = argv[:i] + argv[i + 2:]
+    files: list[str] = []
+    if i + 1 < len(argv):
+        from .win.package import read_open_list
+        files = read_open_list(argv[i + 1]) or []
+    return rest, files
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    argv, listed = take_open_list(argv)
     cmd, paths = parse_args(argv)
+    if listed is not None:
+        cmd, paths = "open", paths + listed
     # Relative paths mean "from here": resolve them before handing them over
     # (the resident Cerclic works from another folder).
     paths = [os.path.abspath(p.strip().strip('"')) for p in paths if p.strip().strip('"')]

@@ -3,7 +3,7 @@
 ; The version is passed with /DMyAppVersion=x.y.z.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.6.0"
+  #define MyAppVersion "0.7.0"
 #endif
 
 #define MyAppName "Cerclic"
@@ -73,14 +73,24 @@ const
   WM_CLOSE = $0010;
   ClassicMenuKey = 'Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}';
 
+{ A folder as a PowerShell string: 'C:\...\' (a quote in it doubled). }
+function PsFolder(Dir: String): String;
+begin
+  Dir := AddBackslash(Dir);
+  StringChangeEx(Dir, '''', '''''', True);
+  Result := '''' + Dir + '''';
+end;
+
 { Stop a running Cerclic before files are replaced or removed. Cerclic 0.2+
   keeps an invisible window: closing it makes Cerclic stop cleanly (running
   actions are cancelled and cleaned up). No program is started, nothing can
-  hang: the wait is bounded, then anything left is ended. }
-procedure StopCerclic();
+  hang: the wait is bounded, then anything left is ended. OtherDir: the
+  previous folder when an update moves Cerclic ('' otherwise). }
+procedure StopCerclic(const OtherDir: String);
 var
   Wnd: HWND;
   Tries, ResultCode: Integer;
+  Dirs, Cmd: String;
 begin
   Wnd := FindWindowByWindowName(QuitWindowTitle);
   if Wnd <> 0 then
@@ -93,9 +103,16 @@ begin
       Tries := Tries + 1;
     end;
   end;
-  { older versions, or a copy that did not answer (this account only) }
-  if Exec(ExpandConstant('{sys}\taskkill.exe'),
-          '/F /FI "USERNAME eq ' + GetUserNameString() + '" /IM {#MyAppExeName} /IM CerclicOpen.exe',
+  { older versions, or a copy that did not answer: only the programs of these
+    folders (Cerclic from the Microsoft Store, installed elsewhere, keeps running) }
+  Dirs := PsFolder(ExpandConstant('{app}'));
+  if OtherDir <> '' then
+    Dirs := Dirs + ', ' + PsFolder(OtherDir);
+  Cmd := '$dirs = @(' + Dirs + '); $p = @(Get-Process -Name Cerclic,CerclicOpen -ErrorAction SilentlyContinue | ' +
+         'Where-Object { $x = $_.Path; $x -and @($dirs | Where-Object { $x.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0 }); ' +
+         'if ($p.Count -eq 0) { exit 1 }; $p | Stop-Process -Force; exit 0';
+  if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+          '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Cmd + '"',
           '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
     Sleep(1500);   { a stopped program releases its files a moment later }
 end;
@@ -207,7 +224,7 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
-  StopCerclic();
+  StopCerclic(WizardForm.PrevAppDir);
   Result := '';
 end;
 
@@ -227,7 +244,7 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    StopCerclic();
+    StopCerclic('');
     { what Cerclic itself added to Windows (right-click entry, start with
       Windows, full Windows 11 menu if it turned it on) }
     Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--cleanup', '', SW_HIDE,

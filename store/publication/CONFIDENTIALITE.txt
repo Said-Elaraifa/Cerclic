@@ -1,0 +1,19 @@
+﻿POLITIQUE DE CONFIDENTIALITÉ DE CERCLIC
+
+Dernière mise à jour : octobre 2026
+
+Cerclic fonctionne entièrement sur ton ordinateur.
+
+Aucune donnée collectée. Cerclic ne collecte, n'enregistre sur un serveur, ne
+transmet ni ne vend aucune donnée personnelle. Il n'y a ni compte, ni
+publicité, ni statistiques d'utilisation, ni mouchard.
+
+Tes fichiers restent chez toi. Les images, PDF, vidéos et sons que tu traites
+avec Cerclic ne quittent jamais ton ordinateur. Cerclic n'utilise pas Internet.
+
+Ce que Cerclic garde sur ton ordinateur. Tes réglages, ta signature si tu en
+as dessiné ou importé une, et un journal technique servent uniquement au
+fonctionnement de l'application. Ils sont rangés dans le dossier de Cerclic sur
+ton ordinateur et disparaissent quand tu désinstalles Cerclic.
+
+Contact : [ton adresse e-mail de contact]

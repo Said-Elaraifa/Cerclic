@@ -17,6 +17,8 @@ pi-heif 1.4 (lecture des photos HEIC) : BSD-3 pour son code ; ses bibliothèques
 NumPy : BSD. OpenCV : Apache 2.0 (sur Mac, avec des bibliothèques FFmpeg
   séparées, sous LGPL). lxml : BSD. fontTools : MIT.
 pywin32 (Windows seulement) : licence PSF. https://github.com/mhammond/pywin32
+pywinrt (Windows seulement, démarrage avec Windows dans la version Microsoft
+  Store) : MIT. https://github.com/pywinrt/pywinrt
 FFmpeg 7.1 (le programme ffmpeg, à part) : GPL v3. Sur Windows, version
   « essentials » de gyan.dev ; sur Mac, version statique (avec x264 et x265) ;
   toutes deux fournies par imageio-ffmpeg.

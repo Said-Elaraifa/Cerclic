@@ -21,9 +21,17 @@ Code source et licence : https://ffmpeg.org et https://www.gyan.dev/ffmpeg/build
 - pikepdf (qpdf), MPL 2.0
 - pdf2docx, MIT ; python-docx, MIT ; opencv-python-headless, Apache 2.0 ;
   numpy, BSD
-- pywin32, PSF
+- pywin32, PSF ; pywinrt (démarrage avec Windows de la version Microsoft Store), MIT
 
 Chacune reste sous sa propre licence. Cerclic lui-même est sous licence MIT
 (voir LICENSE). PyMuPDF étant sous AGPL, une diffusion publique de Cerclic doit
 publier son code source (le dépôt GitHub) ou passer à la licence commerciale
 de PyMuPDF.
+
+## Construction du paquet Microsoft Store
+
+`store/schemas/` contient les schémas XML de Microsoft (projet msix-packaging,
+licence MIT, voir `store/schemas/LICENSE-msix-packaging.txt`), utilisés
+seulement pendant la construction pour vérifier le manifeste. Ils ne sont pas
+dans le paquet. Les fichiers de `tests/data/` servent seulement aux tests
+(provenance et licences dans `tests/data/README.txt`).

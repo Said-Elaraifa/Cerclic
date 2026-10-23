@@ -5,6 +5,7 @@
 ```
 run_cerclic.py            point d'entrée de Cerclic.exe, de Cerclic.app (et de python)
 native/cerclic_open.c     CerclicOpen.exe, le petit programme du clic droit (C, 50 ko)
+native/cerclic_menu.c     CerclicMenu.dll, le clic droit de la version Microsoft Store (IExplorerCommand)
 cerclic/
   launcher.py             instance unique, transmission des demandes (bibliothèque standard seule)
   system.py               ce qui change entre Windows et macOS (module du raccourci, mots)
@@ -26,6 +27,7 @@ cerclic/
     hotkey.py             raccourci clavier choisi par l'utilisateur (RegisterHotKey) et ses règles
     selection.py          fichiers sélectionnés dans la fenêtre au premier plan (Shell.Application)
     foreground.py         mise au premier plan (sur Mac : mac/foreground.py)
+    package.py            version Microsoft Store : identité du paquet, dossiers, tâche de démarrage
   mac/                    macOS uniquement (s'importe partout, ne touche macOS qu'à l'appel)
     hotkey.py             raccourci clavier (RegisterEventHotKey de Carbon) et ses règles
     selection.py          fichiers sélectionnés dans le Finder (AppleScript)
@@ -49,6 +51,13 @@ cerclic/
 installer/cerclic.iss     installateur Inno Setup (par utilisateur, sans droits administrateur)
 cerclic_mac.spec          Cerclic.app (application de la barre des menus, LSUIElement)
 scripts/build_mac.sh      construit, vérifie et installe Cerclic.app sur un Mac, fait le .dmg
+scripts/store/            paquet MSIX du Microsoft Store, sans le SDK de Windows :
+  build.py                construit, puis relit et vérifie chaque paquet ; kits de test et de publication
+  msix.py                 écriture et lecture du paquet (ZIP64, AppxBlockMap, [Content_Types])
+  pri.py                  resources.pri (identique à celui de makepri.exe, octet pour octet)
+  manifest.py             AppxManifest.xml, vérifié avec les schémas de Microsoft (store/schemas)
+  assets.py  screenshots.py   logos du paquet ; captures et icône de la fiche Store
+store/                    identités du paquet, schémas, kit de test, textes de publication
 ```
 
 ## Comment la roue s'ouvre
@@ -87,6 +96,32 @@ travaillé dedans, un clic ailleurs ne les ferme plus (Échap ou Annuler).
 
 Lancer Cerclic depuis son icône (Bureau, menu Démarrer) ou cliquer sur son
 icône près de l'horloge ouvre sa fenêtre de réglages.
+
+## Version Microsoft Store
+
+Le même `dist/Cerclic` (sans `CerclicOpen.exe`), dans un paquet MSIX que
+Microsoft signe. Dans un paquet, ce qui est écrit dans le registre resterait
+privé au paquet : rien n'y est écrit.
+
+- **Clic droit** : le manifeste déclare `CerclicMenu.dll`
+  (`desktop4:FileExplorerContextMenus`, serveur COM `dllhost`), une
+  `IExplorerCommand` : l'entrée est dans le menu court de Windows 11. Elle se
+  cache quand `LocalState\menu-off` existe (réglage « Clic droit »). Un clic
+  envoie les fichiers à l'instance résidente (`\\.\pipe\CerclicStore-<sid>`) ;
+  si Cerclic ne tourne pas, la liste va dans `TempState\open-<n>-<n>.txt` et
+  Cerclic est démarré par son AUMID (`<famille>!Cerclic`, `--open-list`).
+- **Démarrage avec Windows** : la tâche `CerclicStartup` du manifeste
+  (`--background`), lue et changée par l'API `StartupTask` (pywinrt) ; le
+  choix fait dans le Gestionnaire des tâches l'emporte.
+- **Données** : `%LOCALAPPDATA%\Packages\<famille>\LocalState` (réglages,
+  signature, journal), reprises une fois de `%APPDATA%\Cerclic`. Si la
+  version classique est encore installée, Cerclic propose de la retirer.
+- **Construction** : `scripts/build_store.sh` écrit dans `dist_store/` le
+  paquet de test (identité `Cerclic.Test`, non signé, avec son kit
+  d'installation) et, une fois les trois valeurs de Partner Center dans
+  `store/identity.json`, `Cerclic-x.y.z.msix` à soumettre. Chaque paquet est
+  relu : ZIP et blocs, manifeste contre les schémas, logos via
+  `resources.pri`. Le workflow le passe en plus à `makeappx unpack`.
 
 ## Sur Mac
 
@@ -183,6 +218,9 @@ par macOS, réglages tels qu'ils s'affichent sur Mac). Le build Windows est en
 plus essayé sous Wine : roue, rognage, signature, fusion, filigrane, formats
 réseaux, installation (page du dossier comprise), et `--selftest` (qui fait
 aussi une image et une vidéo au format réseaux, fond flou).
+`tests/test_store.py` couvre le paquet Store : `resources.pri` comparé à celui
+de makepri, un paquet de makeappx relu et refait, le manifeste, et
+`CerclicMenu.dll` appelée comme par l'Explorateur sous Wine.
 
 ## Construire
 
@@ -199,6 +237,9 @@ malveillants utilisent aussi. Pas d'UPX, informations de version et manifeste
 renseignés. Seule une signature de code supprime l'avertissement SmartScreen.
 
 Sur Mac : `bash scripts/build_mac.sh` (voir « Sur Mac »).
+
+Paquet Microsoft Store : `scripts/build_store.sh`, après le build Windows
+(voir « Version Microsoft Store »).
 
 Après un changement de la liste des extensions prises en charge :
 `python scripts/gen_installer_registry.py` (un test le vérifie).

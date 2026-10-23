@@ -89,6 +89,11 @@ dossier à ce moment-là y déménage Cerclic). Tant que Cerclic
 n'est pas signé numériquement, Windows peut afficher « Windows a protégé votre
 ordinateur » : « Informations complémentaires », puis « Exécuter quand même ».
 
+Version Microsoft Store : installation en un clic, sans cet avertissement
+(Microsoft signe le paquet), mises à jour automatiques, et « Cerclic »
+directement dans le clic droit de Windows 11. Au premier lancement, elle
+reprend les réglages et la signature de la version classique.
+
 Version portable (`Cerclic-x.y.z-portable.zip`) : décompresse-la où tu veux et
 double-clique sur `Cerclic.exe`. Elle n'ajoute rien à Windows tant que tu ne
 l'actives pas dans ses réglages ; ses données restent dans « Données Cerclic »,
@@ -111,8 +116,9 @@ dossier de ton choix, ou « Me demander à chaque fois »), Signature, Qualité,
 À propos. Tout s'applique aussitôt.
 
 En cas de souci, le journal `cerclic.log` se trouve dans `%APPDATA%\Cerclic`
-(Windows) ou `~/Library/Application Support/Cerclic` (Mac) ; « À propos »,
-« Journal », l'ouvre.
+(Windows), `%LOCALAPPDATA%\Packages\<Cerclic…>\LocalState` (version
+Microsoft Store) ou `~/Library/Application Support/Cerclic` (Mac) ;
+« À propos », « Journal », l'ouvre.
 
 ## Désinstaller
 
@@ -128,7 +134,7 @@ l'ouverture de session), puis mets Cerclic.app à la corbeille.
 python -m venv .venv
 .venv\Scripts\activate          (Mac : source .venv/bin/activate)
 pip install -r requirements-dev.txt
-pytest                          # 330+ tests : actions, interface, Windows, Mac
+pytest                          # 370+ tests : actions, interface, Windows, Mac, Store
 python run_cerclic.py           # lancer depuis le code
 ```
 
@@ -137,5 +143,6 @@ ffmpeg, vraies actions) et écrit `selftest.txt` à côté du journal.
 
 Construire : `scripts/build_windows.sh` (depuis Linux, avec Wine) ou le
 workflow GitHub pour Windows ; `scripts/build_mac.sh` sur un Mac (ou le job
-macOS du workflow). Licences des composants : `assets/LICENCES.txt`. Détails
+macOS du workflow). Paquet Microsoft Store : `scripts/build_store.sh` après le
+build Windows (publication : `store/publication/GUIDE.txt`). Licences des composants : `assets/LICENCES.txt`. Détails
 dans `docs/ARCHITECTURE.md`.

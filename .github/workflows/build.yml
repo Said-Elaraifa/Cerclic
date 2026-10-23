@@ -70,13 +70,16 @@ jobs:
           git diff --exit-code installer/registry.iss
           pytest -q
 
-      - name: Native forwarder (CerclicOpen.exe)
+      - name: Native helpers (CerclicOpen.exe, CerclicMenu.dll)
         shell: msys2 {0}
         run: |
           mkdir -p dist_native
           cd native
+          HARDEN="-Wl,--dynamicbase,--nxcompat,--high-entropy-va"
           windres -O coff cerclic_open.rc -o cerclic_open.res
-          gcc -O2 -Wall -municode -mwindows -static -s -o ../dist_native/CerclicOpen.exe cerclic_open.c cerclic_open.res -lshell32
+          gcc -O2 -Wall -municode -mwindows -static -s $HARDEN -o ../dist_native/CerclicOpen.exe cerclic_open.c cerclic_open.res -lshell32
+          windres -O coff cerclic_menu.rc -o cerclic_menu.res
+          gcc -O2 -Wall -shared -s -static-libgcc $HARDEN -o ../dist_native/CerclicMenu.dll cerclic_menu.c cerclic_menu.def cerclic_menu.res -lole32 -lshell32 -lshlwapi -luuid -luser32
 
       - name: Build app (PyInstaller)
         shell: pwsh
@@ -96,6 +99,26 @@ jobs:
         run: |
           choco install innosetup --no-progress -y
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ steps.ver.outputs.version }}" installer/cerclic.iss
+
+      - name: Microsoft Store package (MSIX)
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python scripts/store/build.py
+          Copy-Item dist_store/*.msix dist_installer/
+          Copy-Item dist_store/*-test.zip dist_installer/
+
+      - name: Check the Store package with Microsoft's makeappx
+        shell: pwsh
+        run: |
+          $makeappx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe |
+            Where-Object { $_.FullName -match "\\x64\\" } | Sort-Object FullName | Select-Object -Last 1
+          if (-not $makeappx) { Write-Host "makeappx absent du runner : vérification sautée"; exit 0 }
+          foreach ($pkg in Get-ChildItem dist_store/*.msix) {
+            & $makeappx.FullName unpack /p $pkg.FullName /d "unpacked\$($pkg.BaseName)" /o
+            if ($LASTEXITCODE -ne 0) { throw "makeappx refuse $($pkg.Name)" }
+          }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

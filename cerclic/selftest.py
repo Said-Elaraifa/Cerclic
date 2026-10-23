@@ -90,6 +90,19 @@ def _ffmpeg() -> str:
     return first[:60]
 
 
+def _store() -> str:
+    """The Microsoft Store version: its identity, its right-click entry and
+    its startup task (Windows' own API, through pywinrt)."""
+    from .win import package
+    if not package.is_packaged():
+        return "non (version classique)"
+    here = os.path.dirname(sys.executable)
+    assert os.path.exists(os.path.join(here, "CerclicMenu.dll")), "CerclicMenu.dll manque"
+    state = package.startup_state()
+    assert state, "tâche de démarrage illisible"
+    return f"paquet {package.family()}, lancement avec Windows : {state}"
+
+
 def _actions(work: str) -> str:
     """An iPhone photo converted, a photo rotated and turned into a PDF, the PDF
     drawn back into an image and protected, a short video made by ffmpeg then
@@ -168,7 +181,8 @@ def run() -> int:
     ok_all = True
     checks = [("Interface (Qt)", _qt), ("PDF", _pdf_engine), ("PDF protégés", _pikepdf),
               ("Images", _images), ("Photos HEIC", _heic), ("PDF en Word", _word),
-              ("Vidéo et son (ffmpeg)", _ffmpeg), ("Actions réelles", lambda: _actions(work))]
+              ("Vidéo et son (ffmpeg)", _ffmpeg), ("Microsoft Store", _store),
+              ("Actions réelles", lambda: _actions(work))]
     for name, check in checks:
         start = time.monotonic()
         try:

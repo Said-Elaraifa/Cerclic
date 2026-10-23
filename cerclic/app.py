@@ -179,6 +179,7 @@ class Bridge(QObject):
     hotkey_status = Signal(int, bool)     # (registration number, ok)
     selection = Signal(int, list)
     finder_refused = Signal(int)          # macOS: not allowed to ask the Finder
+    startup_state = Signal(str, bool)     # Store version: (task state, asked by the user)
 
 
 class FileOpenApp(QApplication):
@@ -325,8 +326,13 @@ class CerclicApp(QObject):
         super().__init__()
         from .ui.cards import CardStack
         self.qapp = qapp
-        from .settings import config_path, is_portable
+        from .settings import config_path, import_classic_settings, is_packaged, is_portable
         self.portable = is_portable()
+        self.packaged = is_packaged()       # the Microsoft Store version
+        # (the choices made in the classic version, if any, are applied once)
+        self._imported = self.packaged and import_classic_settings()
+        if self._imported:
+            log("réglages repris de la version classique de Cerclic")
         first_run = not os.path.exists(config_path())
         self.settings = Settings.load()
         if first_run and self.portable:
@@ -357,11 +363,14 @@ class CerclicApp(QObject):
         self.bridge.hotkey_status.connect(self._on_hotkey_status, Qt.QueuedConnection)
         self.bridge.selection.connect(self._on_selection, Qt.QueuedConnection)
         self.bridge.finder_refused.connect(self._on_finder_refused, Qt.QueuedConnection)
+        self.bridge.startup_state.connect(self._on_startup_state, Qt.QueuedConnection)
 
         self.server = RequestServer(launcher.server_name())
         self.server.request.connect(self.handle_request)
-        # The installer closes this hidden window to stop Cerclic (Windows).
-        self._quit_window = _QuitWindow(self.quit) if IS_WINDOWS else None
+        # The installer closes this hidden window to stop Cerclic (Windows; the
+        # Store version is stopped by Windows itself, and must not be stopped by
+        # the classic version's installer).
+        self._quit_window = _QuitWindow(self.quit) if IS_WINDOWS and not self.packaged else None
         # Files sent by macOS (Quick Action, Ouvrir avec, drop on the icon).
         self.files_received = False
         self._opened: list[str] = []
@@ -374,6 +383,8 @@ class CerclicApp(QObject):
             qapp.early_files.clear()
         self._build_tray()
         self.apply_integration()
+        if self.packaged:
+            QTimer.singleShot(1500, self._check_package)
 
     # -- interrupted actions -------------------------------------------------------------
     def _recover_unfinished(self) -> None:
@@ -418,12 +429,14 @@ class CerclicApp(QObject):
         self._apply_shell()
         self._apply_hotkey()
 
-    def _apply_shell(self) -> None:
+    def _apply_shell(self, changed: str | None = None) -> None:
         if os.environ.get("CERCLIC_NO_INTEGRATION"):   # tests: leave the system alone
             return
         if IS_MAC:
             self._apply_mac()
-        if os.name == "nt":
+        if self.packaged:
+            self._apply_package(changed)
+        elif os.name == "nt":
             from .win import shell
             # (The portable version only ever removes what points to itself:
             # an installed Cerclic keeps its entries.)
@@ -443,6 +456,98 @@ class CerclicApp(QObject):
                     shell.set_autostart(False)
             except Exception:
                 log_exception("démarrage avec Windows : échec")
+
+    # -- Microsoft Store version ------------------------------------------------------
+    def _apply_package(self, changed: str | None = None) -> None:
+        """Inside the package nothing goes to the registry: the right-click entry
+        (CerclicMenu.dll) reads a marker, starting with Windows is the package's
+        startup task (read, or changed when the user asks, away from the window)."""
+        from .win import package
+        if changed in (None, "context_menu"):
+            try:
+                package.set_menu(bool(self.settings.get("context_menu")))
+            except Exception:
+                log_exception("clic droit du paquet")
+        if changed in (None, "autostart"):
+            # At start Windows' state is read (the user may have changed it in
+            # Task Manager); the first time, a choice taken from the classic
+            # version is applied instead.
+            apply = changed is not None or self._imported
+            self._imported = False
+            want = bool(self.settings.get("autostart")) if apply else None
+
+            def work():
+                try:
+                    state = (package.startup_state() if want is None
+                             else package.set_startup(want))
+                except Exception:
+                    log_exception("tâche de démarrage du paquet")
+                    state = None
+                try:
+                    self.bridge.startup_state.emit(state or "", want is not None)
+                except RuntimeError:
+                    pass
+            threading.Thread(target=work, daemon=True, name="cerclic-startup").start()
+
+    def _on_startup_state(self, state: str, asked: bool) -> None:
+        if not state:
+            return                      # unknown (no answer): leave things as they are
+        from .win import package
+        on = package.startup_on(state)
+        wanted = bool(self.settings.get("autostart"))
+        if wanted != on:
+            self.settings.set("autostart", on)
+            self.settings.save()
+        win = self._settings_window()
+        if win is not None:
+            try:
+                win.set_autostart(on)
+            except RuntimeError:
+                pass
+        if asked and wanted and not on:
+            if state == "disabled_by_policy":
+                self.message("Lancement avec Windows bloqué",
+                             "Ton organisation ne permet pas aux applications de se lancer "
+                             "avec Windows.", kind="warn")
+            else:
+                self.message("Lancement avec Windows désactivé dans Windows",
+                             "Il a été désactivé dans le Gestionnaire des tâches : seul "
+                             "Windows peut le réactiver. Dans Paramètres, Applications, "
+                             "Démarrage, active « Cerclic ».", kind="warn",
+                             buttons=[("Plus tard", None),
+                                      ("Ouvrir", package.open_startup_settings)],
+                             auto_ms=20000)
+        log(f"lancement avec Windows : {state}")
+
+    def _check_package(self) -> None:
+        from .win import package
+        package.clean_open_lists()
+        if not package.classic_installed():
+            return
+        log("la version classique de Cerclic est aussi installée")
+        uninstaller = package.classic_uninstaller()
+        if uninstaller:
+            from .ui.cards import reveal_path
+            self.message("Deux Cerclic installés",
+                         "La version de Cerclic installée sans le Microsoft Store est "
+                         "encore là. Pour n'avoir qu'un « Cerclic » dans le clic droit et "
+                         "un seul raccourci, retire-la : « Montrer le désinstalleur », "
+                         "puis double-clique « unins000 ».",
+                         kind="warn",
+                         buttons=[("Plus tard", None),
+                                  ("Montrer le désinstalleur",
+                                   lambda: reveal_path(uninstaller))],
+                         auto_ms=30000)
+        else:
+            self.message("Deux Cerclic installés",
+                         "La version de Cerclic installée sans le Microsoft Store est "
+                         "encore là. Pour n'avoir qu'un « Cerclic », désinstalle-la dans "
+                         "Applications installées : c'est le Cerclic qui n'a pas "
+                         "« Options avancées » dans son menu.",
+                         kind="warn",
+                         buttons=[("Plus tard", None),
+                                  ("Ouvrir les applications", package.open_apps_settings)],
+                         auto_ms=30000)
 
     def _apply_mac(self) -> None:
         """The Finder's Quick Action and opening at login, rewritten at each start
@@ -548,7 +653,7 @@ class CerclicApp(QObject):
         """How to reach the right-click entry on this system."""
         if IS_MAC:
             return "clic droit, Actions rapides, puis « Cerclic »"
-        if os.name == "nt":
+        if os.name == "nt" and not self.packaged:
             try:
                 from .win import shell
                 if shell.is_windows_11() and not shell.classic_menu_enabled():
@@ -1070,12 +1175,12 @@ class CerclicApp(QObject):
             return
         from .ui.settings_window import SettingsWindow
         win11 = classic = False
-        if os.name == "nt":
-            from .win import shell
+        if os.name == "nt" and not self.packaged:   # (the Store version's entry is
+            from .win import shell                    # in Windows 11's short menu)
             win11 = shell.is_windows_11()
             classic = win11 and shell.classic_menu_enabled()
         win = SettingsWindow(self.settings, windows_11=win11, welcome=welcome,
-                             classic_enabled=classic)
+                             classic_enabled=classic, store=self.packaged)
         win.changed.connect(lambda key: self._setting_changed(win, key))
         win.capturing.connect(self._pause_hotkey)
         win.draw_signature.connect(lambda: self._draw_signature(win))
@@ -1094,7 +1199,7 @@ class CerclicApp(QObject):
 
     def _setting_changed(self, win, key: str) -> None:
         if key in ("context_menu", "autostart"):
-            self._apply_shell()
+            self._apply_shell(changed=key)
         elif key == "hotkey":
             self._apply_hotkey()
             try:

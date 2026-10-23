@@ -1,0 +1,139 @@
+﻿FICHE STORE DE CERCLIC : LES TEXTES À COPIER
+
+==============================================================================
+NOM
+==============================================================================
+Cerclic
+
+==============================================================================
+DESCRIPTION
+==============================================================================
+Cerclic ouvre une roue d'actions sur tes fichiers, là où tu es : clic droit
+dans l'Explorateur ou raccourci clavier. Un geste suffit pour rogner, signer,
+compresser, convertir ou mettre au format des réseaux sociaux tes images, PDF,
+vidéos et sons, sans ouvrir d'autre application.
+
+Tout se passe sur ton PC : tes fichiers ne partent jamais en ligne. Et ton
+original n'est jamais modifié : chaque action crée un nouveau fichier, à côté
+de l'original ou dans le dossier de ton choix.
+
+IMAGES
+Rogner, faire pivoter, redimensionner, compresser en voyant la taille obtenue
+avant de valider, convertir (JPG, PNG, WebP et les photos HEIC des iPhone),
+assembler plusieurs images, en faire un PDF, retirer les informations cachées
+(lieu de la prise de vue, appareil).
+
+PDF
+Signer avec ta signature, fusionner, diviser, réorganiser les pages, faire
+pivoter, rogner, compresser, numéroter, ajouter un filigrane, protéger par mot
+de passe ou retirer un mot de passe, convertir en images, en Word ou en texte.
+
+VIDÉOS ET SONS
+Raccourcir, compresser avec la taille estimée, convertir en MP4 ou en GIF,
+extraire le son en MP3, couper le son, faire pivoter. Pour les sons :
+raccourcir, convertir en MP3, compresser.
+
+RÉSEAUX SOCIAUX
+Mets une photo ou une vidéo au bon format en un clic : carré, portrait 4:5,
+grille, story 9:16 (Reels, TikTok, YouTube Shorts), paysage 16:9, bannière.
+Tu choisis le cadrage, ou un fond flou, blanc ou noir pour ne rien couper.
+
+Plusieurs fichiers sélectionnés ? Cerclic les traite d'un coup.
+
+==============================================================================
+DESCRIPTION COURTE (champs supplémentaires)
+==============================================================================
+Une roue d'actions sur tes fichiers, au clic droit ou au clavier : rogner,
+signer, compresser, convertir, mettre au format des réseaux sociaux tes
+images, PDF, vidéos et sons. Tout reste sur ton PC.
+
+==============================================================================
+NOUVEAUTÉS DE CETTE VERSION
+==============================================================================
+Cerclic arrive sur le Microsoft Store : « Cerclic » est maintenant
+directement dans le clic droit de Windows 11, sans passer par « Afficher
+d'autres options ».
+
+==============================================================================
+FONCTIONNALITÉS DU PRODUIT (une par ligne)
+==============================================================================
+Une roue d'actions au clic droit ou au clavier, autour de ta souris
+Images : rogner, compresser, convertir, redimensionner, anonymiser
+Photos HEIC des iPhone converties en JPG
+PDF : signer, fusionner, diviser, compresser, protéger
+PDF en Word, en images ou en texte
+Vidéos : raccourcir, compresser, convertir en MP4 ou en GIF
+Formats des réseaux sociaux : Instagram, TikTok, YouTube, LinkedIn
+La taille obtenue affichée avant de compresser
+Tout reste sur ton PC, rien n'est envoyé en ligne
+Ton fichier d'origine n'est jamais modifié
+
+==============================================================================
+MOTS-CLÉS (si Partner Center les demande, 7 au plus)
+==============================================================================
+PDF
+compresser
+rogner
+signature
+convertir
+réseaux sociaux
+clic droit
+
+==============================================================================
+COPYRIGHT ET MARQUES (si Partner Center le demande)
+==============================================================================
+© 2026 Said El Araifa
+
+==============================================================================
+DÉVELOPPÉ PAR (si Partner Center le demande)
+==============================================================================
+Said El Araifa
+
+==============================================================================
+CONFIGURATION REQUISE (si demandée)
+==============================================================================
+Windows 10 version 2004 ou plus récent, ou Windows 11, 64 bits.
+
+==============================================================================
+CAPACITÉS RESTREINTES : JUSTIFICATION DE « runFullTrust » (en anglais)
+==============================================================================
+Cerclic is a classic Win32 desktop application (Python and Qt) packaged as
+MSIX. It needs runFullTrust to run as a desktop process: it reads the files
+the user selects in File Explorer and writes the results next to them (in any
+folder), runs its bundled ffmpeg.exe for video and audio, registers a global
+keyboard shortcut (RegisterHotKey) to open its action wheel, and provides its
+File Explorer context menu entry through a COM surrogate (IExplorerCommand).
+Everything runs locally; the app does not use the network.
+
+(En français : Cerclic est une application de bureau classique ; elle en a
+besoin pour lire et créer les fichiers que tu choisis, lancer ffmpeg, avoir
+son raccourci clavier et son entrée dans le clic droit.)
+
+==============================================================================
+NOTES POUR LA CERTIFICATION (en anglais)
+==============================================================================
+Cerclic is a file utility. No account or sign-in is needed.
+How to test:
+1. Open Cerclic from Start: its settings window opens, and its icon appears in
+   the notification area.
+2. In File Explorer, right-click an image, a PDF, a video or an audio file and
+   choose "Cerclic" (in the Windows 11 menu itself, no need for "Show more
+   options"). A ring of actions opens around the pointer. Pick one, for example "Pivoter" (rotate): a new file is created
+   next to the original, which is never modified.
+3. Or select files and press Ctrl+Alt+Space.
+The interface is in French. All processing is local (bundled ffmpeg and
+PyMuPDF); the app does not use the network. Cerclic starts with Windows
+(startup task), which the user can turn off in its settings.
+
+==============================================================================
+LÉGENDES DES CAPTURES (dans l'ordre)
+==============================================================================
+1. Clic droit sur une image, puis « Cerclic » : toutes les actions s'ouvrent
+   en roue, autour de ta souris.
+2. Compresser en voyant la taille obtenue avant de valider, avec une loupe
+   pour juger la qualité.
+3. Mettre une photo ou une vidéo au format d'Instagram, TikTok ou YouTube :
+   tu choisis le cadrage.
+4. Signer, fusionner, compresser, protéger ou convertir tes PDF en un geste.
+5. Des réglages simples : raccourci clavier, clic droit, lancement avec
+   Windows. Tout reste sur ton PC.
