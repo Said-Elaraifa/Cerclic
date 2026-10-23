@@ -89,13 +89,24 @@ jobs:
       - name: Native helpers (CerclicOpen.exe, CerclicMenu.dll)
         shell: msys2 {0}
         run: |
+          # each command's errors also shown as annotations
+          run() {
+            out=$("$@" 2>&1); code=$?
+            echo "$out"
+            if [ $code -ne 0 ]; then
+              echo "::error::$1 a échoué ($code)"
+              echo "$out" | grep -v '^\s*$' | head -6 | sed 's/%/%25/g; s/^/::error::/'
+              exit $code
+            fi
+          }
           mkdir -p dist_native
           cd native
+          gcc --version | head -1
           HARDEN="-Wl,--dynamicbase,--nxcompat,--high-entropy-va"
-          windres -O coff cerclic_open.rc -o cerclic_open.res
-          gcc -O2 -Wall -municode -mwindows -static -s $HARDEN -o ../dist_native/CerclicOpen.exe cerclic_open.c cerclic_open.res -lshell32
-          windres -O coff cerclic_menu.rc -o cerclic_menu.res
-          gcc -O2 -Wall -shared -s -static-libgcc $HARDEN -o ../dist_native/CerclicMenu.dll cerclic_menu.c cerclic_menu.def cerclic_menu.res -lole32 -lshell32 -lshlwapi -luuid -luser32
+          run windres -O coff cerclic_open.rc -o cerclic_open.res
+          run gcc -O2 -Wall -municode -mwindows -static -s $HARDEN -o ../dist_native/CerclicOpen.exe cerclic_open.c cerclic_open.res -lshell32
+          run windres -O coff cerclic_menu.rc -o cerclic_menu.res
+          run gcc -O2 -Wall -shared -s -static-libgcc $HARDEN -o ../dist_native/CerclicMenu.dll cerclic_menu.c cerclic_menu.def cerclic_menu.res -lole32 -lshell32 -lshlwapi -luuid -luser32
 
       - name: Build app (PyInstaller)
         shell: pwsh
