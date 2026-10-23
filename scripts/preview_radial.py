@@ -33,8 +33,8 @@ def render(paths, summary, name, hover=-1, preview=None):
     img = QImage(w.size(), QImage.Format_ARGB32)
     p = QPainter(img)
     g = QLinearGradient(0, 0, img.width(), img.height())
-    g.setColorAt(0, QColor(58, 78, 118))
-    g.setColorAt(1, QColor(32, 40, 62))
+    g.setColorAt(0, QColor(150, 185, 230))          # a light desktop, like Windows 11
+    g.setColorAt(1, QColor(70, 110, 180))
     p.fillRect(img.rect(), g)
     w.render(p, QPoint(0, 0))
     p.end()

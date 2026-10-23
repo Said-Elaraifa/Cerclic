@@ -74,8 +74,9 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p dist_native
-          windres -O coff native/cerclic_open.rc -o native/cerclic_open.res
-          gcc -O2 -Wall -municode -mwindows -static -s -o dist_native/CerclicOpen.exe native/cerclic_open.c native/cerclic_open.res -lshell32
+          cd native
+          windres -O coff cerclic_open.rc -o cerclic_open.res
+          gcc -O2 -Wall -municode -mwindows -static -s -o ../dist_native/CerclicOpen.exe cerclic_open.c cerclic_open.res -lshell32
 
       - name: Build app (PyInstaller)
         shell: pwsh
