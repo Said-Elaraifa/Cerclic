@@ -14,7 +14,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native:
+    # CerclicOpen.exe and CerclicMenu.dll, compiled with mingw-w64 from Linux,
+    # as scripts/build_windows.sh does
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Native helpers (CerclicOpen.exe, CerclicMenu.dll)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+          mkdir -p dist_native
+          cd native
+          P=x86_64-w64-mingw32
+          HARDEN="-Wl,--dynamicbase,--nxcompat,--high-entropy-va"
+          $P-windres -O coff cerclic_open.rc -o cerclic_open.res
+          $P-gcc -O2 -Wall -municode -mwindows -static -s $HARDEN -o ../dist_native/CerclicOpen.exe cerclic_open.c cerclic_open.res -lshell32
+          $P-windres -O coff cerclic_menu.rc -o cerclic_menu.res
+          $P-gcc -O2 -Wall -shared -s -static-libgcc $HARDEN -o ../dist_native/CerclicMenu.dll cerclic_menu.c cerclic_menu.def cerclic_menu.res -lole32 -lshell32 -lshlwapi -luuid -luser32
+          ls -la ../dist_native
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native
+          path: dist_native/*
+          retention-days: 7
+
   build:
+    needs: native
     runs-on: windows-latest
     env:
       # Qt's offscreen platform finds no font on Windows without it (tests and
@@ -27,11 +55,6 @@ jobs:
         with:
           python-version: "3.12"
           architecture: x64
-
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-binutils
 
       - name: Determine version
         id: ver
@@ -86,27 +109,11 @@ jobs:
             exit $code
           }
 
-      - name: Native helpers (CerclicOpen.exe, CerclicMenu.dll)
-        shell: msys2 {0}
-        run: |
-          # each command's errors also shown as annotations
-          run() {
-            out=$("$@" 2>&1); code=$?
-            echo "$out"
-            if [ $code -ne 0 ]; then
-              echo "::error::$1 a échoué ($code)"
-              echo "$out" | grep -v '^\s*$' | head -6 | sed 's/%/%25/g; s/^/::error::/'
-              exit $code
-            fi
-          }
-          mkdir -p dist_native
-          cd native
-          gcc --version | head -1
-          HARDEN="-Wl,--dynamicbase,--nxcompat,--high-entropy-va"
-          run windres -O coff cerclic_open.rc -o cerclic_open.res
-          run gcc -O2 -Wall -municode -mwindows -static -s $HARDEN -o ../dist_native/CerclicOpen.exe cerclic_open.c cerclic_open.res -lshell32
-          run windres -O coff cerclic_menu.rc -o cerclic_menu.res
-          run gcc -O2 -Wall -shared -s -static-libgcc $HARDEN -o ../dist_native/CerclicMenu.dll cerclic_menu.c cerclic_menu.def cerclic_menu.res -lole32 -lshell32 -lshlwapi -luuid -luser32
+      - name: Native helpers (built by the native job)
+        uses: actions/download-artifact@v4
+        with:
+          name: native
+          path: dist_native
 
       - name: Build app (PyInstaller)
         shell: pwsh
@@ -199,6 +206,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: out
+          pattern: Cerclic-*
           merge-multiple: true
 
       - name: Fixed names for the download links
