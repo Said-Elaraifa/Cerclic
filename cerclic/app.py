@@ -26,7 +26,11 @@ from .settings import Settings
 
 # A right-click on many files starts one forwarder per file: paths arriving
 # less than MERGE_GAP s after the previous one join the wheel already open.
+# When Cerclic was busy as they came (first start, a heavy preview), they
+# arrive later in a bunch: a wheel nobody has touched yet still takes them
+# for MERGE_UNTOUCHED s.
 MERGE_GAP = 1.0
+MERGE_UNTOUCHED = 6.0
 MERGE_MAX = 60.0
 
 
@@ -34,6 +38,14 @@ def _gc_now() -> None:
     import gc
     if not gc.isenabled():
         gc.collect()
+
+
+def _portable() -> bool:
+    """Run from the portable zip (no uninstaller beside it)?"""
+    if not getattr(sys, "frozen", False):
+        return False
+    return not os.path.exists(os.path.join(os.path.dirname(sys.executable),
+                                           "unins000.exe"))
 
 
 def _summary(paths: list[str]) -> str:
@@ -213,12 +225,17 @@ class WheelSession:
         self.wheel.chosen.connect(self._chosen)
         self.wheel.cancelled.connect(self.close)
         self.wheel.popup_at(pos)
+        self.last_add = time.monotonic()        # building the wheel may take a moment
         log("roue ouverte : " + ", ".join(menu.keys()) + f" ({len(paths)} fichier(s))")
 
     def can_merge(self) -> bool:
+        if self.closed or self.source != "menu" or self.wheel.navigated:
+            return False
         now = time.monotonic()
-        return (not self.closed and self.source == "menu" and not self.wheel.navigated
-                and now - self.last_add < MERGE_GAP and now - self.created < MERGE_MAX)
+        if now - self.created >= MERGE_MAX:
+            return False
+        return (now - self.last_add < MERGE_GAP
+                or (not self.wheel.touched and now - self.created < MERGE_UNTOUCHED))
 
     def add(self, paths: list[str]) -> None:
         """Merge already-cleaned paths. The wheel is refreshed once per burst,
@@ -272,7 +289,15 @@ class CerclicApp(QObject):
         super().__init__()
         from .ui.cards import CardStack
         self.qapp = qapp
+        from .settings import config_path
+        first_run = not os.path.exists(config_path())
         self.settings = Settings.load()
+        if first_run and _portable():
+            # The portable version adds nothing to Windows unless asked to
+            # (its folder may be deleted at any time).
+            self.settings.set("context_menu", False)
+            self.settings.set("autostart", False)
+            self.settings.save()
         self.cards = CardStack()
         self._recover_unfinished()
         self.session: WheelSession | None = None
@@ -284,6 +309,9 @@ class CerclicApp(QObject):
         self.hotkey = None
         self.hotkey_ok = None
         self._hotkey_paused = False
+        self._good_combo = None         # the last combination Windows accepted
+        self._trying = None             # set while a newly chosen one is tried
+        self._hotkey_note = ""
 
         self.bridge = Bridge()
         self.bridge.hotkey.connect(self._on_hotkey, Qt.QueuedConnection)
@@ -386,17 +414,50 @@ class CerclicApp(QObject):
         if self.hotkey is None:
             return                      # an older registration, already replaced
         self.hotkey_ok = ok
+        combo = (self.hotkey.mods, self.hotkey.vk)
+        trying, self._trying = self._trying, None
         win = self._settings_window()
+        if ok:
+            self._good_combo = combo
+        elif trying is not None and trying != combo:
+            # The combination just chosen is taken: keep the one that worked.
+            from .win.hotkey import label
+            refused, kept = label(*combo), label(*trying)
+            self.settings.set("hotkey_mods", trying[0])
+            self.settings.set("hotkey_vk", trying[1])
+            self.settings.save()
+            if win is not None:
+                self._hotkey_note = (f"{refused} est déjà utilisé par Windows ou une "
+                                     f"autre application. Ton raccourci reste {kept}.")
+                win.show_combo(*trying)
+            else:
+                self.message(f"Raccourci {refused} indisponible",
+                             "Windows ou une autre application l'utilise déjà. "
+                             f"Ton raccourci reste {kept}.", kind="warn")
+            self._apply_hotkey(restart=True)
+            return
         if win is not None:
-            win.set_hotkey_status(ok)
+            note, self._hotkey_note = self._hotkey_note, ""
+            win.set_hotkey_status(ok, note)
         elif not ok:
             fallback = (" ; le clic droit « Cerclic » marche toujours"
                         if self.settings.get("context_menu") else "")
             self.message(f"Raccourci {self.hotkey_label()} indisponible",
-                         "Une autre application l'utilise déjà. Choisis-en un autre "
-                         f"dans Cerclic{fallback}.",
+                         "Windows ou une autre application l'utilise déjà. Choisis-en "
+                         f"un autre dans Cerclic{fallback}.",
                          kind="warn", buttons=[("Plus tard", None),
                                                ("Choisir", self.open_settings)])
+
+    def right_click_how(self) -> str:
+        """How to reach the right-click entry on this Windows."""
+        if os.name == "nt":
+            try:
+                from .win import shell
+                if shell.is_windows_11() and not shell.classic_menu_enabled():
+                    return "clic droit, « Afficher d'autres options », puis « Cerclic »"
+            except Exception:
+                pass
+        return "clic droit, puis « Cerclic »"
 
     # -- requests ------------------------------------------------------------------------
     def handle_request(self, cmd: str, paths: list) -> None:
@@ -461,8 +522,7 @@ class CerclicApp(QObject):
                 self.message("Sélectionne d'abord un fichier",
                              "Clique sur une image, un PDF, une vidéo ou un son dans "
                              "l'Explorateur ou sur le Bureau, puis appuie sur "
-                             f"{self.hotkey_label()}. Ou fais un clic droit sur le "
-                             "fichier, puis « Cerclic ».")
+                             f"{self.hotkey_label()}. Ou : {self.right_click_how()}.")
             return
         if self.session is not None:
             self.session.close()
@@ -518,27 +578,39 @@ class CerclicApp(QObject):
     def _flow(self, action, files, opts, pos):
         from .actions import pdf as pdf_actions
         if action.id in registry.PASSWORD_AWARE:
-            locked = [f for f in files if pdf_actions.needs_password(f)]
-            if locked:
-                hint = f"« {os.path.basename(locked[0])} » est protégé."
-                for _attempt in range(4):
-                    pw = yield self._ask_text("Mot de passe du PDF", hint, pos,
-                                              password=True, ok_label="Déverrouiller")
-                    if pw is None:
+            # Each protected PDF is asked for by name (a password already typed
+            # for another one is tried first: often they share it).
+            ok_label = "Déverrouiller" if action.id == "pdf_unlock" else "Continuer"
+            passwords: dict[str, str] = {}
+            for f in [f for f in files if pdf_actions.needs_password(f)]:
+                pw = next((k for k in dict.fromkeys(passwords.values())
+                           if pdf_actions.password_ok(f, k)), None)
+                hint = f"« {os.path.basename(f)} » est protégé."
+                tries = 0
+                while pw is None:
+                    if tries == 4:
+                        self.message("Mot de passe incorrect", "Rien n'a été créé.",
+                                     kind="error")
                         return
-                    if all(pdf_actions.password_ok(f, pw) for f in locked):
-                        break
-                    hint = "Mot de passe incorrect. Réessaie."
-                else:
-                    self.message("Mot de passe incorrect", "Le PDF n'a pas été modifié.",
-                                 kind="error")
-                    return
-                opts["password"] = pw
+                    typed = yield self._ask_text("Mot de passe du PDF", hint, pos,
+                                                 password=True, ok_label=ok_label)
+                    if typed is None:
+                        return
+                    tries += 1
+                    if pdf_actions.password_ok(f, typed):
+                        pw = typed
+                    else:
+                        hint = (f"Mot de passe incorrect pour « {os.path.basename(f)} ». "
+                                "Réessaie.")
+                passwords[f] = pw
+            if passwords:
+                opts["passwords"] = passwords
+        first_pw = registry._pw(opts, files[0])
         for need in action.needs:
             if need == "crop":
                 from .ui.crop_editor import CropEditor
                 res = yield self._ask_editor(
-                    lambda: CropEditor(files[0], opts.get("password")), pos)
+                    lambda: CropEditor(files[0], first_pw), pos)
                 if res is None:
                     return
                 opts.update(res)
@@ -554,7 +626,7 @@ class CerclicApp(QObject):
                     self.settings.save()
                 from .ui.signature import SignPlacer
                 res = yield self._ask_editor(
-                    lambda: SignPlacer(files[0], sig, opts.get("password")), pos)
+                    lambda: SignPlacer(files[0], sig, first_pw), pos)
                 if res is None:
                     return
                 if res["signature"] != self.settings.get("signature"):
@@ -564,7 +636,7 @@ class CerclicApp(QObject):
             elif need == "pages":
                 from .ui.pages_editor import PagesEditor
                 res = yield self._ask_editor(
-                    lambda: PagesEditor(files[0], opts.get("password")), pos)
+                    lambda: PagesEditor(files[0], first_pw), pos)
                 if res is None:
                     return
                 opts.update(res)
@@ -634,7 +706,7 @@ class CerclicApp(QObject):
     def _run_job(self, action, files, opts, pos, attempts: int) -> None:
         from .ui.cards import JobCard
         job = Job(action.id, files, dict(opts), journal=self.journal)
-        card = JobCard(action.label)
+        card = JobCard(action.card_title)
         state = {"shown": False}
 
         def show_card():
@@ -774,6 +846,7 @@ class CerclicApp(QObject):
                 pass
         elif key == "hotkey_combo":
             self._hotkey_paused = False
+            self._trying = self._good_combo     # kept if the new one is taken
             self._apply_hotkey(restart=True)
         elif key == "classic_menu" and os.name == "nt":
             from .win import shell
@@ -859,6 +932,15 @@ def _collect_on_gui_thread(qapp) -> QTimer:
 def run_resident(cmd: str, paths: list[str], lock) -> int:
     """Start the resident Cerclic, then perform the request that started it."""
     _install_crash_logging()
+    if getattr(sys, "frozen", False):
+        # Started by a right-click, Cerclic would otherwise keep the clicked
+        # file's folder as its working folder for the whole session: that USB
+        # key could not be ejected, that folder not renamed or deleted.
+        from .sysenv import neutral_dir
+        try:
+            os.chdir(neutral_dir())
+        except OSError:
+            pass
     qInstallMessageHandler(_qt_messages)
     qapp = QApplication.instance() or QApplication(sys.argv[:1])
     qapp.setQuitOnLastWindowClosed(False)
@@ -866,7 +948,7 @@ def run_resident(cmd: str, paths: list[str], lock) -> int:
     qapp.setApplicationVersion(__version__)
     from .ui.theme import apply_app_theme
     apply_app_theme(qapp)
-    _gc_timer = _collect_on_gui_thread(qapp)  # noqa: F841 (lives with qapp)
+    qapp._cerclic_gc = _collect_on_gui_thread(qapp)
     log(f"démarrage de Cerclic {__version__} (journal : {log_path()})")
     if not QSystemTrayIcon.isSystemTrayAvailable():
         log("zone de notification indisponible au démarrage, nouvel essai")

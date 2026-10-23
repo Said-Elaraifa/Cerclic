@@ -20,17 +20,32 @@
 #include <shellapi.h>
 #include <string.h>
 
-#define MAX_LIFETIME_MS 45000
-#define WAIT_STEPS 300 /* x 100 ms */
+#define FIRST_LIFETIME_MS 45000   /* bound for a blocked pipe call */
+#define WAIT_MS 30000             /* Cerclic should listen within this... */
+#define WAIT_STARTING_MS 120000   /* ...or this, while it is visibly starting */
 
 static wchar_t g_pipe[96];
+static volatile ULONGLONG g_deadline;
+static volatile LONG g_showing;
 
 static DWORD WINAPI watchdog(LPVOID unused)
 {
     (void)unused;
-    Sleep(MAX_LIFETIME_MS);
-    ExitProcess(2);
+    for (;;) {
+        if (!g_showing && GetTickCount64() >= g_deadline)
+            ExitProcess(2);
+        Sleep(250);
+    }
     return 0;
+}
+
+static BOOL resident_exists(void)
+{
+    HANDLE h = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\Cerclic.Resident");
+    if (!h)
+        return FALSE;
+    CloseHandle(h);
+    return TRUE;
 }
 
 static void make_pipe_name(void)
@@ -108,28 +123,44 @@ static int try_send(const char *msg, DWORD len)
     return 1;
 }
 
-static void start_cerclic(void)
+/* The started Cerclic (its process handle), or NULL if it could not start. */
+static HANDLE start_cerclic(void)
 {
     wchar_t exe[MAX_PATH + 32];
     DWORD n = GetModuleFileNameW(NULL, exe, MAX_PATH);
     if (n == 0 || n >= MAX_PATH)
-        return;
+        return NULL;
     wchar_t *slash = wcsrchr(exe, L'\\');
     if (!slash)
-        return;
+        return NULL;
     lstrcpyW(slash + 1, L"Cerclic.exe");
     wchar_t cmd[MAX_PATH + 64];
     wsprintfW(cmd, L"\"%s\" --background", exe);
+    /* Cerclic's own folder, not the clicked file's (that folder could
+       otherwise not be ejected or deleted while Cerclic runs). */
+    wchar_t dir[MAX_PATH + 32];
+    lstrcpyW(dir, exe);
+    dir[slash - exe] = 0;
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     ZeroMemory(&si, sizeof si);
     si.cb = sizeof si;
     ZeroMemory(&pi, sizeof pi);
-    if (CreateProcessW(exe, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        AllowSetForegroundWindow(pi.dwProcessId);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-    }
+    if (!CreateProcessW(exe, cmd, NULL, NULL, FALSE, 0, NULL, dir, &si, &pi))
+        return NULL;
+    AllowSetForegroundWindow(pi.dwProcessId);
+    CloseHandle(pi.hThread);
+    return pi.hProcess;
+}
+
+static void tell_failure(void)
+{
+    g_showing = 1;
+    MessageBoxW(NULL,
+                L"Cerclic n'a pas pu d\u00e9marrer.\n\n"
+                L"Ouvre Cerclic depuis son ic\u00f4ne (Bureau ou menu D\u00e9marrer), "
+                L"puis r\u00e9essaie. Si cela recommence, r\u00e9installe Cerclic.",
+                L"Cerclic", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND | MB_TOPMOST);
 }
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
@@ -139,6 +170,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!argv || argc < 2)
         return 0;
+    g_deadline = GetTickCount64() + FIRST_LIFETIME_MS;
     HANDLE t = CreateThread(NULL, 0, watchdog, NULL, 0, NULL);
     if (t)
         CloseHandle(t);
@@ -153,18 +185,38 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     /* Cerclic is not running: one copy starts it, every copy waits for it. */
     HANDLE launch = CreateMutexW(NULL, FALSE, L"Local\\Cerclic.Launch");
     BOOL first = launch != NULL && GetLastError() != ERROR_ALREADY_EXISTS;
-    HANDLE resident = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\Cerclic.Resident");
-    if (resident) {           /* it is starting already */
-        CloseHandle(resident);
-        first = FALSE;
+    HANDLE proc = NULL;
+    if (first && !resident_exists()) {  /* else it is starting already */
+        proc = start_cerclic();
+        if (!proc) {                    /* missing, or blocked: say so at once */
+            CloseHandle(launch);
+            tell_failure();
+            return 1;
+        }
     }
-    if (first)
-        start_cerclic();
-    int i;
-    for (i = 0; i < WAIT_STEPS; i++) {
+    ULONGLONG t0 = GetTickCount64();
+    for (;;) {
         Sleep(100);
         if (try_send(msg, len) == 1)
             return 0;
+        if (proc && WaitForSingleObject(proc, 0) == WAIT_OBJECT_0) {
+            DWORD code = 0;
+            if (GetExitCodeProcess(proc, &code) && code != 0 && !resident_exists())
+                break;                  /* it stopped at once: no need to wait */
+            CloseHandle(proc);          /* (it handed over to another one) */
+            proc = NULL;
+        }
+        ULONGLONG waited = GetTickCount64() - t0;
+        /* A slow start (logon, antivirus scan) is waited for as long as
+           Cerclic is visibly starting. */
+        if (waited > WAIT_MS && (!resident_exists() || waited > WAIT_STARTING_MS))
+            break;
+        g_deadline = GetTickCount64() + 15000;
+    }
+    if (first) {               /* say it once, never in silence */
+        if (launch)
+            CloseHandle(launch);   /* the next right-click may start it again */
+        tell_failure();
     }
     return 1;
 }

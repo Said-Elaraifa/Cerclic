@@ -187,9 +187,13 @@ def restart_explorer() -> None:
     subprocess.run(["taskkill", "/f", "/im", "explorer.exe"], creationflags=flags,
                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL)
+    from ..sysenv import clean_env
+    # Explorer becomes the desktop again: it must not inherit Cerclic's own
+    # environment (every program started from the taskbar would get it).
     subprocess.Popen([os.path.join(windir, "explorer.exe")], close_fds=True,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL)
+                     stderr=subprocess.DEVNULL, env=clean_env(),
+                     cwd=windir if os.path.isdir(windir) else None)
 
 
 # ----- uninstall -----------------------------------------------------------------------------

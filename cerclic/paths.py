@@ -99,6 +99,8 @@ def clean_selection(paths) -> list[str]:
         key = os.path.normcase(p)
         if key in seen or not os.path.isfile(p):
             continue
+        if "$recycle.bin" in key.replace("\\", "/").lower().split("/"):
+            continue        # an item of the Recycle Bin (named $R...): not a real file
         seen.add(key)
         out.append(p)
     out.sort(key=lambda p: (natural_key(p), p.lower()))

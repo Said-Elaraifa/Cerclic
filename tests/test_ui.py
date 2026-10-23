@@ -402,7 +402,10 @@ def test_hotkey_rules():
     assert hk.label(hk.DEFAULT_MODS, hk.DEFAULT_VK) == "Ctrl + Alt + Espace"
     assert hk.check(hk.DEFAULT_MODS, hk.DEFAULT_VK) is None
     assert hk.check(hk.MOD_CONTROL | hk.MOD_SHIFT, 0x58) is None      # Ctrl+Maj+X
-    assert hk.check(0, 0x77) is None                                  # F8
+    assert hk.check(0, 0x77)                                          # F8 alone (Word…)
+    assert hk.check(hk.MOD_CONTROL | hk.MOD_ALT, 0x77) is None        # Ctrl+Alt+F8
+    assert hk.check(0, 0x7C) is None                                  # F13 (mouse button)
+    assert hk.label(hk.MOD_WIN | hk.MOD_SHIFT, 0x43) == "Win + Maj + C"
     assert hk.check(hk.MOD_WIN | hk.MOD_SHIFT, 0x43) is None
     assert hk.check(0, 0x41)                                          # a plain letter
     assert hk.check(hk.MOD_SHIFT, 0x41)                               # a capital letter
@@ -617,10 +620,31 @@ def test_result_card_stays_on_screen(qtbot, tmp_path):
     assert card.height() > before
     assert card.geometry().bottom() <= geo.bottom() + 5   # 16 px of it is shadow
     buttons = [b for b in card.findChildren(QPushButton) if b.isVisible()]
-    assert {b.text() for b in buttons} >= {"Ouvrir", "Dossier", "Annuler"}
+    assert {b.text() for b in buttons} >= {"Ouvrir", "Dossier", "Supprimer", "✕"}
     for b in buttons:
         bottom = b.mapTo(card, b.rect().bottomLeft()).y()
         assert bottom <= card.height() - 16
+    # "Supprimer" removes the new file, says so, and leaves the original alone
+    [delete] = [b for b in buttons if b.text() == "Supprimer"]
+    delete.click()
+    assert not out.exists()
+    assert card.isVisible() and "supprimé" in card._head.text()
+    card.close()
+
+
+def test_result_card_shortens_a_long_name(qtbot, tmp_path):
+    from cerclic.engine import Result
+    from cerclic.ui.cards import CardStack, JobCard
+    stack = CardStack()
+    card = JobCard("Compression")
+    stack.add(card)
+    name = "Releve_de_compte_janvier_fevrier_mars_avril_mai_juin_definitif (compressed).pdf"
+    out = tmp_path / name
+    out.write_bytes(b"x")
+    card.finish(Result(action_id="pdf_compress", ok=True, outputs=[str(out)]))
+    qtbot.wait(50)
+    assert "…" in card._status.text() and card._status.toolTip() == name
+    assert card.width() <= 360
     card.close()
 
 

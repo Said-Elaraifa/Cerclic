@@ -55,6 +55,7 @@ class Picture:
     exif: bytes | None = None
     dpi: tuple | None = None
     source_format: str = ""
+    pages: int = 1              # a multi-page TIFF (scan, fax): only page 1 is loaded
 
     @property
     def animated(self) -> bool:
@@ -72,7 +73,8 @@ class Picture:
 
     def map(self, fn: Callable) -> "Picture":
         return Picture([fn(f) for f in self.frames], list(self.durations),
-                       self.loop, self.icc, self.exif, self.dpi, self.source_format)
+                       self.loop, self.icc, self.exif, self.dpi, self.source_format,
+                       self.pages)
 
     @property
     def is_cmyk(self) -> bool:
@@ -85,7 +87,7 @@ class Picture:
             return self
         frames = [_cmyk_to_srgb(f, self.icc) for f in self.frames]
         return Picture(frames, list(self.durations), self.loop, _srgb_icc(),
-                       self.exif, self.dpi, self.source_format)
+                       self.exif, self.dpi, self.source_format, self.pages)
 
 
 def load(src: str) -> Picture:
@@ -116,7 +118,29 @@ def load(src: str) -> Picture:
                 exif = ex.tobytes()
         except Exception:
             exif = None
-        return Picture([upright], [], 0, icc, exif, dpi, fmt)
+        return Picture([upright], [], 0, icc, exif, dpi, fmt,
+                       pages=n if fmt == "TIFF" else 1)
+
+
+def _one_page(src: str, pic: Picture) -> None:
+    """Edits write one picture: refuse a multi-page TIFF rather than silently
+    keep only its first page."""
+    if pic.pages > 1:
+        raise UserError(f"« {os.path.basename(src)} » a {pic.pages} pages : seule la "
+                        "première serait gardée. Utilise « En PDF » pour les garder "
+                        "toutes.")
+
+
+def tiff_pages(src: str):
+    """Every page of a TIFF (scan, fax), one at a time: (image, has_alpha)."""
+    with Image.open(src) as im:
+        n = getattr(im, "n_frames", 1) or 1
+        for i in range(n):
+            im.seek(i)
+            fr = im.copy()
+            alpha = fr.mode in ("RGBA", "LA", "PA") or (
+                fr.mode == "P" and "transparency" in fr.info)
+            yield fr, alpha
 
 
 def oriented_size(src: str) -> tuple[int, int]:
@@ -284,6 +308,7 @@ def keep_format(src: str, pic: Picture | None = None) -> tuple[str, str]:
 
 def _write(src: str, pic: Picture, tag: str, fmt: str | None = None,
            quality: int | None = None, optimize: bool = False) -> str:
+    _one_page(src, pic)
     if fmt is None:
         fmt, ext = keep_format(src, pic)
     else:
@@ -300,7 +325,12 @@ def convert_image(src: str, fmt: str, quality: int | None = None) -> str:
     fmt = "jpg" if fmt.lower() in ("jpg", "jpeg") else fmt.lower()
     if fmt not in ("jpg", "png", "webp"):
         raise ValueError(f"unsupported target format: {fmt}")
-    pic = load(src).to_srgb()
+    pic = load(src)
+    if _EXT_FORMAT.get(ext_of(src)) == fmt and not pic.is_cmyk:
+        # (a print-colour JPG does become a screen-colour one: that is useful)
+        raise NothingToDo(f"C'est déjà un {fmt.upper()}.")
+    pic = pic.to_srgb()
+    _one_page(src, pic)
     if pic.animated and fmt != "webp":
         pic = Picture(pic.frames[:1], [], 0, pic.icc, pic.exif, pic.dpi,
                       pic.source_format)
@@ -313,6 +343,7 @@ def to_jpg(src: str) -> str:
 
 def _quantize(im: Image.Image) -> Image.Image:
     """256-colour palette with dithering: the TinyPNG trick, keeps alpha."""
+    im = _to_8bit(im)            # 16-bit grey would be clipped to white
     if im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info):
         return im.convert("RGBA").quantize(256, method=Image.Quantize.FASTOCTREE,
                                            dither=Image.Dither.FLOYDSTEINBERG)
@@ -325,6 +356,7 @@ def compress_image(src: str, quality: int = 70) -> str:
     `quality`; PNG is reduced to an optimised 256-colour palette; other formats
     become JPG. Raises NothingToDo when the result would not be smaller."""
     pic = load(src).to_srgb()
+    _one_page(src, pic)
     e = ext_of(src)
     if e == ".png" and not pic.animated:
         pic = pic.map(_quantize)
@@ -583,7 +615,7 @@ def strip_metadata(src: str, quality: int | None = None) -> str:
             os.remove(out)                       # fall back to a re-encoded copy
     pic = load(src)
     pic = Picture(pic.frames, pic.durations, pic.loop, pic.icc, None, pic.dpi,
-                  pic.source_format)
+                  pic.source_format, pic.pages)
     return _write(src, pic, "clean", quality=quality)
 
 

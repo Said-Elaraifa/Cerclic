@@ -9,6 +9,9 @@ cerclic/
   launcher.py             instance unique, transmission des demandes (bibliothèque standard seule)
   app.py                  l'instance résidente : icône, serveur de demandes, roue, éditeurs, tâches
   engine.py               lance une action, renvoie un résultat, ne lève jamais d'exception
+  jobs.py                 sur un thread, ou dans un processus à part pour les PDF lourds
+  journal.py              fichiers inachevés (coupure, plantage) retirés au démarrage suivant
+  sysenv.py               environnement et dossier de travail des programmes lancés pour l'utilisateur
   errors.py               erreurs prévues (mot de passe, rien à faire, annulation)
   paths.py                noms de sortie réservés atomiquement, jamais d'écrasement
   settings.py  log.py     réglages JSON et journal dans %APPDATA%\Cerclic
@@ -45,7 +48,12 @@ installer/cerclic.iss     installateur Inno Setup (par utilisateur, sans droits 
    (`AllowSetForegroundWindow`) et se termine en quelques millisecondes. Les
    chemins qui arrivent dans la même seconde rejoignent la roue déjà ouverte.
    Si Cerclic ne tourne pas, une seule copie le démarre (mutex
-   `Local\Cerclic.Launch`), toutes attendent puis transmettent.
+   `Local\Cerclic.Launch`, dossier de travail : celui de Cerclic), toutes
+   attendent puis transmettent ; tant que Cerclic démarre visiblement (mutex
+   `Local\Cerclic.Resident`), l'attente continue jusqu'à deux minutes. S'il
+   ne répond jamais, la copie qui l'a lancé le dit dans une fenêtre de message
+   plutôt que de rester muette. Des chemins arrivés en retard parce que
+   Cerclic était occupé rejoignent encore la roue tant qu'on n'y a pas touché.
 2. **Le raccourci clavier** (Ctrl+Alt+Espace au départ, modifiable dans la
    fenêtre de Cerclic). `RegisterHotKey` : Windows ne prévient Cerclic que pour
    cette combinaison. Cerclic lit alors la sélection de la fenêtre de
@@ -81,6 +89,14 @@ Windows ouverts en même temps ont chacun leur Cerclic.
 - **Une action = métadonnées + fonction** (`registry.ACTIONS`) : libellé,
   description courte (affichée au centre de la roue), catégorie, ce qu'il
   faut demander (`needs`), variantes (`choices`).
+- **Programmes lancés pour l'utilisateur** (Explorateur redémarré, application
+  qui ouvre un résultat) : sans les variables que l'empaquetage ajoute pour
+  Cerclic (plugins Qt, son dossier en tête du PATH), et Cerclic lui-même
+  travaille depuis un dossier neutre (une clé USB reste éjectable).
+- **PDF lourds** : PyMuPDF garde la main pendant tout un rendu. Dessiner toutes
+  les pages ou recompresser les images d'un PDF moyen se fait donc dans un
+  processus à part, et la roue ne montre pas l'aperçu d'une première page trop
+  chargée (un plan détaillé).
 - **Threads et Qt** : le ramasse-miettes cyclique de Python ne tourne que sur
   le thread de l'interface (désactivé, puis lancé régulièrement), sinon il
   pourrait détruire une fenêtre Qt depuis un thread de travail. Les

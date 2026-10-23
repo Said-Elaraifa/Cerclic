@@ -80,7 +80,29 @@ def probe(src: str) -> Probe:
             info.width, info.height = info.height, info.width
     elif re.search(r"Stream #\d+:\d+.*?: Video:", text):
         info.has_video = True
+    if info.duration <= 0 and (info.has_video or info.has_audio):
+        info.duration = _measure_duration(src)
     return info
+
+
+_TIME = re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
+
+
+def _measure_duration(src: str) -> float:
+    """Length of a file whose header does not give it (screen or browser
+    recordings in WEBM): read through it without decoding anything."""
+    try:
+        proc = subprocess.run([ffmpeg_path(), "-hide_banner", "-nostdin", "-i", src,
+                               "-c", "copy", "-f", "null", "-"],
+                              stdin=subprocess.DEVNULL, capture_output=True,
+                              creationflags=_NO_WINDOW, timeout=120)
+    except (subprocess.TimeoutExpired, OSError):
+        return 0.0
+    found = _TIME.findall(proc.stderr.decode("utf-8", "replace"))
+    if not found:
+        return 0.0
+    h, mi, sec = found[-1]
+    return int(h) * 3600 + int(mi) * 60 + float(sec)
 
 
 def _friendly_ffmpeg_error(tail: str) -> str:
@@ -91,8 +113,12 @@ def _friendly_ffmpeg_error(tail: str) -> str:
         return "Accès refusé : le fichier est peut-être ouvert dans une autre application."
     if "no space left" in low:
         return "Le disque est plein."
-    last = tail.strip().splitlines()[-1:] or ["erreur inconnue"]
-    return "La conversion a échoué : " + last[0][:160]
+    if "no such file" in low:
+        return "Fichier introuvable : il a peut-être été déplacé ou supprimé."
+    from ..log import log
+    log("ffmpeg : " + tail.strip()[-600:])
+    return ("Le traitement a échoué : le fichier est peut-être endommagé ou dans un "
+            "format inhabituel.")
 
 
 def _run(args: list[str], duration: float, ctx, label: str) -> None:
@@ -149,6 +175,9 @@ def _run(args: list[str], duration: float, ctx, label: str) -> None:
 
 def _need_video(info: Probe) -> None:
     if not info.has_video:
+        if info.has_audio:
+            raise UserError("Ce fichier ne contient que du son, pas d'image : utilise "
+                            "« Extraire le son » pour en faire un MP3.")
         raise UserError("Aucune image vidéo dans ce fichier.")
 
 
@@ -159,6 +188,8 @@ def compress_video(src: str, crf: int = 27, max_short_side: int = 1080, ctx=None
     """Lighter H.264 MP4, at most 1080p (short side, so phone videos filmed
     upright keep their 1080 x 1920), readable everywhere."""
     info = probe(src)
+    if not info.has_video and info.has_audio:     # a sound in a video file (.webm...)
+        return compress_audio(src, ctx=ctx)
     _need_video(info)
     out = output_for(src, "compressed", new_ext=".mp4")
     m = max_short_side
@@ -192,8 +223,9 @@ def to_gif(src: str, fps: int = 12, width: int = 480, ctx=None) -> str:
     info = probe(src)
     _need_video(info)
     if info.duration > GIF_MAX_SECONDS:
-        raise UserError("Vidéo trop longue pour un GIF (plus de 2 minutes) : "
-                        "un GIF de cette durée pèserait des centaines de Mo.")
+        raise UserError("Vidéo trop longue pour un GIF (plus de 2 minutes : il "
+                        "pèserait des centaines de Mo). Garde d'abord un passage avec "
+                        "« Raccourcir ».")
     out = output_for(src, "gif", new_ext=".gif")
     scale = f"fps={fps},scale='min({width},iw)':-2:flags=lanczos"
     tmpdir = tempfile.mkdtemp(prefix="cerclic-gif-")
@@ -229,9 +261,10 @@ class _Half:
 
 
 def extract_mp3(src: str, ctx=None) -> str:
+    from ..errors import NothingToDo
     info = probe(src)
     if not info.has_audio:
-        raise UserError("Cette vidéo n'a pas de son.")
+        raise NothingToDo("Cette vidéo n'a pas de son.")
     out = output_for(src, "audio", new_ext=".mp3")
     _run(["-i", src, "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "2", out],
          info.duration, ctx, "Extraction du son")
@@ -274,7 +307,7 @@ def trim_media(src: str, start: float, end: float, ctx=None) -> str:
         from ..errors import NothingToDo
         raise NothingToDo("Le passage choisi est la totalité du fichier.")
     length = end - start
-    if kind_of(src) == "video":
+    if kind_of(src) == "video" and (info.has_video or not info.has_audio):
         _need_video(info)
         out = output_for(src, "cut", new_ext=".mp4")
         _run(["-ss", _fmt_time(start), "-i", src, "-t", _fmt_time(length),
@@ -354,30 +387,57 @@ def audio_to_mp3(src: str, ctx=None) -> str:
 
 # ----- previews for the cutting popup ------------------------------------------------------
 
-def _capture(args: list[str], timeout: float = 20.0) -> bytes:
-    """Run ffmpeg and return what it writes on stdout (a PNG)."""
-    proc = subprocess.run([ffmpeg_path(), "-hide_banner", "-nostdin", "-loglevel", "error",
-                           *args], stdin=subprocess.DEVNULL, capture_output=True,
-                          creationflags=_NO_WINDOW, timeout=timeout)
-    if proc.returncode != 0 or not proc.stdout:
+def _capture(args: list[str], timeout: float = 20.0, should_stop=None) -> bytes:
+    """Run ffmpeg and return what it writes on stdout (a PNG). The process is
+    tied to Cerclic (it stops with it), and killed if it takes too long or as
+    soon as `should_stop()` says the popup that wanted it has closed."""
+    if should_stop is not None and should_stop():
+        raise Cancelled()
+    proc = subprocess.Popen([ffmpeg_path(), "-hide_banner", "-nostdin", "-loglevel",
+                             "error", *args], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            creationflags=_NO_WINDOW)
+    if os.name == "nt":
+        try:
+            from ..win.jobobject import kill_with_cerclic
+            kill_with_cerclic(proc.pid)
+        except Exception:
+            pass
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            out, _ = proc.communicate(timeout=0.25)
+            break
+        except subprocess.TimeoutExpired:
+            stopped = should_stop is not None and should_stop()
+            if stopped or time.monotonic() > deadline:
+                proc.kill()
+                proc.communicate()
+                if stopped:
+                    raise Cancelled()
+                raise UserError("Aperçu trop long à préparer.")
+    if proc.returncode != 0 or not out:
         raise UserError("Aperçu impossible.")
-    return proc.stdout
+    return out
 
 
-def frame_png(src: str, t: float, max_w: int, max_h: int) -> bytes:
+def frame_png(src: str, t: float, max_w: int, max_h: int, should_stop=None) -> bytes:
     """One frame at `t` seconds, fitted in max_w x max_h, as PNG bytes."""
     vf = (f"scale=w={int(max_w)}:h={int(max_h)}:force_original_aspect_ratio=decrease,"
           "format=rgb24")
     return _capture(["-ss", _fmt_time(max(0.0, t)), "-i", src, "-frames:v", "1",
-                     "-vf", vf, "-f", "image2pipe", "-c:v", "png", "-"])
+                     "-vf", vf, "-f", "image2pipe", "-c:v", "png", "-"],
+                    should_stop=should_stop)
 
 
-def waveform_png(src: str, width: int, height: int, color: str = "#F2A93B") -> bytes:
+def waveform_png(src: str, width: int, height: int, color: str = "#F2A93B",
+                 should_stop=None) -> bytes:
     """The sound drawn as a waveform, as PNG bytes (transparent background)."""
     graph = (f"aformat=channel_layouts=mono,showwavespic=s={int(width)}x{int(height)}"
              f":colors={color}:scale=sqrt")
     return _capture(["-i", src, "-filter_complex", graph, "-frames:v", "1",
-                     "-f", "image2pipe", "-c:v", "png", "-"], timeout=120.0)
+                     "-f", "image2pipe", "-c:v", "png", "-"], timeout=120.0,
+                    should_stop=should_stop)
 
 
 def compress_audio(src: str, ctx=None) -> str:

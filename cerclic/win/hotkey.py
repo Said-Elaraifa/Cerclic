@@ -70,16 +70,16 @@ def key_name(vk: int) -> str:
 
 
 def label(mods: int, vk: int) -> str:
-    """'Ctrl + Alt + Espace'"""
+    """'Ctrl + Alt + Espace', 'Win + Maj + C' (in the order Windows writes them)."""
     parts = []
+    if mods & MOD_WIN:
+        parts.append("Win")
     if mods & MOD_CONTROL:
         parts.append("Ctrl")
     if mods & MOD_ALT:
         parts.append("Alt")
     if mods & MOD_SHIFT:
         parts.append("Maj")
-    if mods & MOD_WIN:
-        parts.append("Win")
     parts.append(key_name(vk))
     return " + ".join(parts)
 
@@ -121,12 +121,12 @@ def check(mods: int, vk: int) -> str | None:
         return "Ajoute une touche après Ctrl, Alt, Maj ou Win."
     if (mods, vk) in _RESERVED:
         return _RESERVED[(mods, vk)]
-    is_f_key = 0x70 <= vk <= 0x87
-    if is_f_key:
-        if not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) and (vk <= 0x75 or 0x79 <= vk <= 0x7B):
-            return (f"{key_name(vk)} sert déjà dans Windows (aide, renommer, actualiser, "
-                    "plein écran…). Ajoute Ctrl, Alt ou Win, ou prends F7, F8, F9.")
-        return None
+    if 0x7C <= vk <= 0x87 and not mods:
+        return None          # F13 to F24 alone: rare keys (programmable mouse buttons)
+    if 0x70 <= vk <= 0x7B and not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN):
+        return (f"{key_name(vk)} sert déjà dans Windows et les applications (aide, "
+                "renommer, actualiser, orthographe…). Ajoute par exemple Ctrl + Alt : "
+                f"Ctrl + Alt + {key_name(vk)}.")
     if 0x60 <= vk <= 0x69 and mods & MOD_ALT and not mods & (MOD_CONTROL | MOD_WIN):
         return ("Alt avec le pavé numérique sert à taper des caractères "
                 "(Alt + 0201 = É). Choisis une autre combinaison.")
@@ -136,9 +136,11 @@ def check(mods: int, vk: int) -> str | None:
     if mods & MOD_WIN:
         pass                                           # Win + key: Windows says if taken
     elif bin(mods).count("1") < 2:
-        name = "Ctrl" if mods & MOD_CONTROL else "Alt"
+        name, uses, other = (("Ctrl", "gras, copier, coller, enregistrer…", "Alt")
+                             if mods & MOD_CONTROL
+                             else ("Alt", "les menus des applications", "Ctrl"))
         return (f"{name} + une seule touche sert déjà dans beaucoup d'applications "
-                "(gras, copier, menus…). Ajoute Maj ou une autre touche, par exemple "
+                f"({uses}). Ajoute Maj ou {other}, par exemple "
                 f"{name} + Maj + {key_name(vk)}.")
     if mods & MOD_CONTROL and mods & MOD_ALT and not mods & MOD_WIN:
         typed = _altgr_types(vk, bool(mods & MOD_SHIFT)) if _ON_WINDOWS else None
@@ -180,7 +182,9 @@ class Hotkey:
         self._ready.wait(2.0)
 
     def stop(self) -> None:
-        if self._tid:
+        # Only a live registration thread is asked to quit: a thread id is
+        # reused by Windows once its thread has ended.
+        if self._tid and self._thread is not None and self._thread.is_alive():
             ctypes.windll.user32.PostThreadMessageW(self._tid, WM_QUIT, 0, 0)
         if self._thread:
             self._thread.join(timeout=2.0)
@@ -199,7 +203,9 @@ class Hotkey:
                                         self.vk))
         self.ok = ok
         log(f"raccourci {self.label} : "
-            f"{'actif' if ok else 'déjà pris par une autre application'}")
+            f"{'actif' if ok else 'déjà pris par Windows ou une autre application'}")
+        if not ok:
+            self._tid = 0
         self._ready.set()
         self.on_status(ok)
         if not ok:
@@ -213,4 +219,5 @@ class Hotkey:
                     except Exception as exc:
                         log(f"erreur raccourci : {exc!r}")
         finally:
+            self._tid = 0
             user32.UnregisterHotKey(None, HOTKEY_ID)

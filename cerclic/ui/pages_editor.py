@@ -188,7 +188,7 @@ class PagesEditor(EditorWindow):
         self._fill()
         self.open_at()
         self.grid.setFocus()
-        dpr = self.devicePixelRatioF() or 1.0
+        dpr = self.dpr()
         height = int(THUMB_H * dpr)
         path, pw = self.path, self.password
         self._loader.run_reporting(

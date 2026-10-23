@@ -98,16 +98,32 @@ class CropCanvas(QWidget):
         self.image = image
         self.full = (float(full_size[0]), float(full_size[1]))
         W, H = self.full
-        if keep_rel:
+        if keep_rel:              # another page: the frame the user drew stays
             x0, y0, x1, y1 = keep_rel
             self.sel = QRectF(x0 * W, y0 * H, (x1 - x0) * W, (y1 - y0) * H)
+            if self.aspect:
+                self.sel = self._with_aspect(self.sel)
         else:
             self.sel = QRectF(0, 0, W, H)
+            if self.aspect:
+                self.set_aspect(self.aspect)
         self.message = ""
-        if self.aspect:
-            self.set_aspect(self.aspect)
         self.update()
         self.changed.emit()
+
+    def _with_aspect(self, r: QRectF) -> QRectF:
+        """`r` given the locked proportions (a page of another shape), same
+        centre and width as far as the picture allows."""
+        W, H = self.full
+        w = min(r.width(), W)
+        h = w / self.aspect
+        if h > H:
+            h = H
+            w = h * self.aspect
+        c = r.center()
+        x = min(max(0.0, c.x() - w / 2), W - w)
+        y = min(max(0.0, c.y() - h / 2), H - h)
+        return QRectF(x, y, w, h)
 
     def bounds(self) -> QRectF:
         return QRectF(0, 0, self.full[0], self.full[1])
@@ -416,6 +432,11 @@ class CropEditor(EditorWindow):
         self.tools.addStretch(1)
         self.size_label = QLabel("")
         self.size_label.setObjectName("hint")
+        self.size_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        # wide enough for "12000 × 12000 px": the popup does not change width
+        # while the frame is dragged
+        self.size_label.setMinimumWidth(
+            self.size_label.fontMetrics().horizontalAdvance("00000 × 00000 px") + 6)
         self.tools.addWidget(self.size_label)
 
         self.page = 0
@@ -464,8 +485,15 @@ class CropEditor(EditorWindow):
             self.anchor = anchor
         w, h, count, index = probe_size(self.path, 0, self.password)
         self.page_count, self.page = count, index
-        room_w, room_h = self.room(520, 580) if self.is_pdf else self.room()
-        dpr = self.devicePixelRatioF() or 1.0
+        if self.is_pdf:
+            room_w, room_h = self.room(520, 580)
+        elif h > 1.8 * w:            # a long screenshot: the screen's height
+            room_w, room_h = self.room(600, 2000)
+        elif w > 2.4 * h:            # a panorama: most of the screen's width
+            room_w, room_h = self.room(1500, 470, screen_share=0.9)
+        else:
+            room_w, room_h = self.room()
+        dpr = self.dpr()
         vw, vh = fit_view(w, h, room_w - 2 * MARGIN, room_h - 2 * MARGIN,
                           min_side=300, max_scale=1.0 / dpr if not self.is_pdf else 1.6)
         self.canvas.setFixedSize(QSize(vw + 2 * MARGIN, vh + 2 * MARGIN))
@@ -475,7 +503,7 @@ class CropEditor(EditorWindow):
         self._load()
 
     def _target_px(self) -> tuple[int, int]:
-        dpr = self.devicePixelRatioF() or 1.0
+        dpr = self.dpr()
         w = max(64, int((self.canvas.width() - 2 * MARGIN) * dpr))
         h = max(64, int((self.canvas.height() - 2 * MARGIN) * dpr))
         return w, h
@@ -526,7 +554,8 @@ class CropEditor(EditorWindow):
     def _goto(self, index: int) -> None:
         if not (0 <= index < self.page_count) or index == self.page:
             return
-        self._keep_rel = self.canvas.rel_box() if self.canvas.image is not None else None
+        if self.canvas.image is not None:     # (while a page loads, keep the last frame)
+            self._keep_rel = self.canvas.rel_box()
         self.page = index
         self._load()
 

@@ -249,6 +249,9 @@ def wait_resident_exit(timeout: float) -> bool:
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     cmd, paths = parse_args(argv)
+    # Relative paths mean "from here": resolve them before handing them over
+    # (the resident Cerclic works from another folder).
+    paths = [os.path.abspath(p.strip().strip('"')) for p in paths if p.strip().strip('"')]
 
     if cmd == "cleanup":  # called by the uninstaller
         send("quit", [], timeout=2.0)

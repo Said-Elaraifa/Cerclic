@@ -58,6 +58,11 @@ class Action:
     choices: tuple = field(default_factory=tuple)
     desc: str = ""              # one short line, shown in the wheel
     ui: str = ""                # done by the app itself ("clipboard")
+    title: str = ""             # what the progress and result cards call it
+
+    @property
+    def card_title(self) -> str:
+        return self.title or self.label
 
 
 def each(paths, ctx, fn) -> list[str]:
@@ -90,7 +95,12 @@ def _q(opts) -> int:
     return int(opts.get("jpg_quality", images.DEFAULT_JPG_QUALITY))
 
 
-def _pw(opts):
+def _pw(opts, path=None):
+    """The password to open this PDF: each protected file may have its own."""
+    if path is not None:
+        pw = (opts.get("passwords") or {}).get(path)
+        if pw:
+            return pw
     return opts.get("password") or None
 
 
@@ -114,14 +124,14 @@ ACTIONS: list[Action] = [
     # ---- Images ----
     Action("img_crop", "Rogner", "image", frozenset({"image"}),
            lambda paths, o, ctx: [images.crop_image(paths[0], o["crop_box"], _q(o))],
-           icon="crop", needs=("crop",), max_files=1, desc="Garder une partie"),
+           icon="crop", needs=("crop",), max_files=1, desc="Garder une partie", title="Rognage"),
     Action("img_rotate", "Pivoter", "image", frozenset({"image"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: _turn_image(p, o)),
-           icon="rotate", choices=IMAGE_TURN_CHOICES, desc="Tourner ou retourner"),
+           icon="rotate", choices=IMAGE_TURN_CHOICES, desc="Tourner ou retourner", title="Rotation"),
     Action("img_resize", "Redimensionner", "image", frozenset({"image"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: images.resize_image(
                p, max_side=o.get("max_side"), percent=o.get("percent"), quality=_q(o))),
-           icon="resize", desc="Moins de pixels",
+           icon="resize", desc="Moins de pixels", title="Redimensionnement",
            choices=(Choice("half", "50 %", "half", (("percent", 50),)),
                     Choice("1920", "1920 px", "px", (("max_side", 1920),)),
                     Choice("1280", "1280 px", "px", (("max_side", 1280),)),
@@ -129,138 +139,139 @@ ACTIONS: list[Action] = [
     Action("img_compress", "Compresser", "image", frozenset({"image"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: images.compress_image(
                p, int(o.get("quality", 70)))),
-           icon="compress", desc="Plus léger, même taille"),
+           icon="compress", desc="Plus léger, même taille", title="Compression"),
     Action("img_convert", "Convertir", "image", frozenset({"image"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: images.convert_image(
                p, o.get("fmt", "jpg"), _q(o))),
-           icon="convert", desc="Changer de format",
+           icon="convert", desc="Changer de format", title="Conversion",
            choices=(Choice("jpg", "JPG", "jpg", (("fmt", "jpg"),)),
                     Choice("png", "PNG", "png", (("fmt", "png"),)),
                     Choice("webp", "WEBP", "webp", (("fmt", "webp"),)))),
     Action("img_copy", "Copier", "image", frozenset({"image"}),
            lambda paths, o, ctx: [], icon="copy", max_files=1, ui="clipboard",
-           desc="À coller où tu veux"),
+           desc="À coller où tu veux", title="Copie"),
     Action("img_to_pdf", "En PDF", "image", frozenset({"image"}),
            lambda paths, o, ctx: [pdf.images_to_pdf(paths, ctx=ctx)],
-           icon="topdf", desc="Une page par image"),
+           icon="topdf", desc="Une page par image", title="Création du PDF"),
     Action("img_assemble", "Assembler", "image", frozenset({"image"}),
            lambda paths, o, ctx: [images.assemble_images(
                paths, o.get("layout", "row"), _q(o), ctx=ctx)],
-           icon="assemble", min_files=2, desc="Plusieurs en une",
+           icon="assemble", min_files=2, desc="Plusieurs en une", title="Assemblage",
            choices=(Choice("row", "Côte à côte", "row", (("layout", "row"),)),
                     Choice("column", "En colonne", "column", (("layout", "column"),)),
                     Choice("grid", "En grille", "grid", (("layout", "grid"),)))),
     Action("img_clean", "Anonymiser", "image", frozenset({"image"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: images.strip_metadata(
                p, _q(o))),
-           icon="shield", desc="Retire GPS, appareil, date"),
+           icon="shield", desc="Retire GPS, appareil, date", title="Anonymisation"),
 
     # ---- PDF ----
     Action("pdf_sign", "Signer", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: [pdf.sign_pdf(paths[0], o["signature"],
                                                int(o.get("page", -1)), o.get("sig_box"),
-                                               _pw(o))],
-           icon="sign", needs=("place_sig",), max_files=1, desc="Placer ta signature"),
+                                               _pw(o, paths[0]))],
+           icon="sign", needs=("place_sig",), max_files=1, desc="Placer ta signature", title="Signature"),
     Action("pdf_crop", "Rogner", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: [pdf.crop_pdf(paths[0], o["crop_rel"],
-                                               o.get("crop_page"), _pw(o))],
-           icon="crop", needs=("crop",), max_files=1, desc="Couper les marges"),
+                                               o.get("crop_page"), _pw(o, paths[0]))],
+           icon="crop", needs=("crop",), max_files=1, desc="Couper les marges", title="Rognage"),
     Action("pdf_compress", "Compresser", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.compress_pdf(
-               p, _pw(o), ctx)),
-           icon="compress", desc="Plus léger à envoyer"),
+               p, _pw(o, p), ctx)),
+           icon="compress", desc="Plus léger à envoyer", title="Compression"),
     Action("pdf_merge", "Fusionner", "pdf", frozenset({"pdf"}),
-           lambda paths, o, ctx: [pdf.merge_pdfs(paths, _pw(o), ctx)],
-           icon="merge", min_files=2, desc="Un seul PDF"),
+           lambda paths, o, ctx: [pdf.merge_pdfs(paths, {p: _pw(o, p) for p in paths},
+                                                 ctx)],
+           icon="merge", min_files=2, desc="Un seul PDF", title="Fusion"),
     Action("pdf_pages", "Pages", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: [pdf.arrange_pdf(
-               paths[0], o["pages_order"], _pw(o),
+               paths[0], o["pages_order"], _pw(o, paths[0]),
                tag="extract" if o.get("pages_mode") == "extract" else "organized")],
            icon="pages", needs=("pages",), max_files=1,
-           desc="Trier, tourner, supprimer"),
+           desc="Trier, tourner, supprimer", title="Organisation des pages"),
     Action("pdf_to_word", "En Word", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.pdf_to_word(
-               p, _pw(o), ctx)),
-           icon="word", desc="Modifiable dans Word"),
+               p, _pw(o, p), ctx)),
+           icon="word", desc="Modifiable dans Word", title="Conversion en Word"),
     Action("pdf_to_images", "En images", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.pdf_to_images(
-               p, o.get("fmt", "jpg"), password=_pw(o), ctx=ctx)),
-           icon="image", desc="Une image par page",
+               p, o.get("fmt", "jpg"), password=_pw(o, p), ctx=ctx)),
+           icon="image", desc="Une image par page", title="Conversion en images",
            choices=(Choice("jpg", "JPG", "jpg", (("fmt", "jpg"),)),
                     Choice("png", "PNG", "png", (("fmt", "png"),)))),
     Action("pdf_split", "Diviser", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.split_pdf(
-               p, password=_pw(o), ctx=ctx)),
-           icon="split", primary=False, desc="Un PDF par page"),
+               p, password=_pw(o, p), ctx=ctx)),
+           icon="split", primary=False, desc="Un PDF par page", title="Découpage en pages"),
     Action("pdf_rotate", "Pivoter", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.rotate_pdf(
-               p, int(o.get("degrees", 90)), _pw(o))),
+               p, int(o.get("degrees", 90)), _pw(o, p))),
            icon="rotate", primary=False, choices=ROTATE_CHOICES,
-           desc="Toutes les pages"),
+           desc="Toutes les pages", title="Rotation"),
     Action("pdf_watermark", "Filigrane", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.add_watermark(
-               p, o["text"], _pw(o), ctx=ctx)),
+               p, o["text"], _pw(o, p), ctx=ctx)),
            icon="watermark", needs=("text",), primary=False,
-           desc="Un texte en travers"),
+           desc="Un texte en travers", title="Filigrane"),
     Action("pdf_numbers", "Numéroter", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.add_page_numbers(
-               p, _pw(o), ctx=ctx)),
-           icon="numbers", primary=False, desc="Numéros en bas de page"),
+               p, _pw(o, p), ctx=ctx)),
+           icon="numbers", primary=False, desc="Numéros en bas de page", title="Numérotation"),
     Action("pdf_text", "En texte", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.pdf_to_text(
-               p, _pw(o), ctx=ctx)),
-           icon="text", primary=False, desc="Le texte en .txt"),
+               p, _pw(o, p), ctx=ctx)),
+           icon="text", primary=False, desc="Le texte en .txt", title="Extraction du texte"),
     Action("pdf_protect", "Protéger", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.protect_pdf(
                p, o["new_password"])),
            icon="lock", needs=("new_password",), primary=False,
-           desc="Avec un mot de passe"),
+           desc="Avec un mot de passe", title="Protection"),
     Action("pdf_unlock", "Déverrouiller", "pdf", frozenset({"pdf"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: pdf.unlock_pdf(
-               p, o.get("password", ""))),
-           icon="unlock", primary=False, desc="Retirer le mot de passe"),
+               p, _pw(o, p) or "")),
+           icon="unlock", primary=False, desc="Retirer le mot de passe", title="Déverrouillage"),
 
     # ---- Video ----
     Action("vid_trim", "Raccourcir", "video", frozenset({"video"}),
            lambda paths, o, ctx: [video.trim_media(paths[0], o["trim_start"],
                                                    o["trim_end"], ctx=ctx)],
-           icon="trim", needs=("trim",), max_files=1, desc="Garder un passage"),
+           icon="trim", needs=("trim",), max_files=1, desc="Garder un passage", title="Découpe"),
     Action("vid_compress", "Compresser", "video", frozenset({"video"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.compress_video(
                p, ctx=ctx)),
-           icon="compress", desc="Plus légère, en MP4"),
+           icon="compress", desc="Plus légère, en MP4", title="Compression"),
     Action("vid_mp4", "En MP4", "video", frozenset({"video"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.to_mp4(p, ctx=ctx)),
-           icon="mp4", desc="Lisible partout"),
+           icon="mp4", desc="Lisible partout", title="Conversion en MP4"),
     Action("vid_gif", "En GIF", "video", frozenset({"video"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.to_gif(p, ctx=ctx)),
-           icon="gif", desc="Une animation sans son"),
+           icon="gif", desc="Une animation sans son", title="Création du GIF"),
     Action("vid_mp3", "Extraire le son", "video", frozenset({"video"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.extract_mp3(
                p, ctx=ctx)),
-           icon="mp3", desc="La bande son en MP3"),
+           icon="mp3", desc="La bande son en MP3", title="Extraction du son"),
     Action("vid_mute", "Couper le son", "video", frozenset({"video"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.mute_video(
                p, ctx=ctx)),
-           icon="mute", desc="La vidéo sans son"),
+           icon="mute", desc="La vidéo sans son", title="Suppression du son"),
     Action("vid_rotate", "Pivoter", "video", frozenset({"video"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.rotate_video(
                p, int(o.get("degrees", 90)), ctx=ctx)),
-           icon="rotate", choices=ROTATE_CHOICES, desc="Remettre à l'endroit"),
+           icon="rotate", choices=ROTATE_CHOICES, desc="Remettre à l'endroit", title="Rotation"),
 
     # ---- Sound ----
     Action("aud_trim", "Raccourcir", "audio", frozenset({"audio"}),
            lambda paths, o, ctx: [video.trim_media(paths[0], o["trim_start"],
                                                    o["trim_end"], ctx=ctx)],
-           icon="trim", needs=("trim",), max_files=1, desc="Garder un passage"),
+           icon="trim", needs=("trim",), max_files=1, desc="Garder un passage", title="Découpe"),
     Action("aud_mp3", "En MP3", "audio", frozenset({"audio"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.audio_to_mp3(
                p, ctx=ctx)),
-           icon="mp3", desc="Lisible partout"),
+           icon="mp3", desc="Lisible partout", title="Conversion en MP3"),
     Action("aud_compress", "Compresser", "audio", frozenset({"audio"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.compress_audio(
                p, ctx=ctx)),
-           icon="compress", desc="Plus léger, en MP3"),
+           icon="compress", desc="Plus léger, en MP3", title="Compression"),
 ]
 
 BY_ID = {a.id: a for a in ACTIONS}

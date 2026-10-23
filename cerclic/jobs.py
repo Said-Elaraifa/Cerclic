@@ -19,6 +19,11 @@ from .actions import registry
 
 ISOLATE_BYTES = 8_000_000          # PDFs bigger than this go to a worker process
 ALWAYS_ISOLATED = {"pdf_to_word"}  # long pure-Python work, heavy imports
+# Drawing every page (to images) or re-encoding every picture (compress) can
+# take long even on a medium file (a detailed plan): a worker process for
+# anything but small files, a thread for those (quicker to start).
+RENDERING = {"pdf_to_images", "pdf_compress"}
+RENDERING_BYTES = 1_500_000
 
 
 def should_isolate(action_id: str, paths: list[str]) -> bool:
@@ -33,6 +38,8 @@ def should_isolate(action_id: str, paths: list[str]) -> bool:
             total += os.path.getsize(p)
         except OSError:
             pass
+    if action_id in RENDERING:
+        return total > RENDERING_BYTES
     return total > ISOLATE_BYTES
 
 

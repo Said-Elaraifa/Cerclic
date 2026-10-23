@@ -71,6 +71,11 @@ def friendly_error(exc: BaseException) -> str:
     if isinstance(exc, PermissionError):
         return ("Accès refusé : le fichier est peut-être ouvert dans une autre "
                 "application, ou le dossier est protégé.")
+    long_name = len(str(getattr(exc, "filename", "") or "")) >= 250
+    if isinstance(exc, OSError) and (long_name or getattr(exc, "errno", None) == errno.ENAMETOOLONG
+                                     or getattr(exc, "winerror", None) == 206):
+        return ("Nom ou chemin trop long pour Windows : renomme le fichier plus court, "
+                "ou déplace-le dans un dossier moins profond.")
     if isinstance(exc, FileNotFoundError):
         return "Fichier introuvable : il a peut-être été déplacé ou supprimé."
     if isinstance(exc, MemoryError):
@@ -82,8 +87,8 @@ def friendly_error(exc: BaseException) -> str:
         return "Image illisible ou format non pris en charge."
     if name in ("FileDataError", "EmptyFileError", "PdfError"):
         return "PDF endommagé ou illisible."
-    text = str(exc).strip() or name
-    return f"Erreur inattendue : {text[:160]}"
+    return ("Erreur inattendue. Réessaie ; si cela recommence, le détail est dans "
+            "le journal de Cerclic (cerclic.log).")
 
 
 def _cleanup(reserved: list[str]) -> None:
@@ -106,6 +111,13 @@ def run(action_id: str, paths: list[str], opts: dict | None = None,
     t0 = time.perf_counter()
     with _paths.tracking() as reserved:
         try:
+            gone = [p for p in paths if not os.path.exists(p)]
+            if gone:
+                name = os.path.basename(gone[0])
+                raise UserError(f"« {name} » n'est plus là : il a été déplacé, renommé "
+                                "ou supprimé (ou la clé USB retirée)." if len(gone) == 1
+                                else f"{len(gone)} fichiers ne sont plus là : ils ont été "
+                                     "déplacés, renommés ou supprimés.")
             if len(paths) < action.min_files:
                 raise UserError(f"{action.label} : il faut au moins "
                                 f"{action.min_files} fichiers.")

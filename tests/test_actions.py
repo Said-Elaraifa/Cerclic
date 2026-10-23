@@ -59,10 +59,12 @@ def _open_fds_to(path):
 
 def test_convert_formats_keep_original(png_with_alpha):
     before = _sha(png_with_alpha)
-    for fmt, ext in (("jpg", ".jpg"), ("png", ".png"), ("webp", ".webp")):
+    for fmt, ext in (("jpg", ".jpg"), ("webp", ".webp")):
         out = _ok(engine.run("img_convert", [png_with_alpha], {"fmt": fmt}))[0]
         assert out.lower().endswith(ext)
         assert os.path.dirname(out) == os.path.dirname(png_with_alpha)
+    same = engine.run("img_convert", [png_with_alpha], {"fmt": "png"})
+    assert same.info and "déjà un PNG" in same.error      # no lossy duplicate
     assert _sha(png_with_alpha) == before
 
 
@@ -912,7 +914,6 @@ def test_probe_reads_phone_rotation(monkeypatch):
 
 
 def test_assemble_converts_colours_to_srgb(tmp_path):
-    import io
     from PIL import ImageCms
     srgb = ImageCms.createProfile("sRGB")
     lab_like = ImageCms.ImageCmsProfile(srgb).tobytes()

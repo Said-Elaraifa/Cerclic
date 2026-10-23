@@ -80,6 +80,9 @@ def load_preview(path: str, size: int):
         from .crop_editor import load_image_preview
         return load_image_preview(path, size, size)[0]
     if k == "pdf":
+        from ..actions.pdf import quick_to_draw
+        if not quick_to_draw(path):         # a detailed plan would hold Cerclic up
+            return None
         from .crop_editor import load_pdf_preview
         return load_pdf_preview(path, 0, size, size, None)[0]
     if k == "video":
@@ -114,6 +117,7 @@ class Wheel(QWidget):
         self._center_hover = False
         self._pressed_inside = False
         self._navigated = False
+        self._touched = False         # the user pointed at a slice, clicked, typed
         self._done = False
         self._shown_at = 0.0
         self._glow: list[float] = []
@@ -150,6 +154,10 @@ class Wheel(QWidget):
     @property
     def navigated(self) -> bool:
         return self._navigated
+
+    @property
+    def touched(self) -> bool:
+        return self._touched or self._navigated
 
     def _reset_levels(self) -> None:
         if len(self._menu) == 1:
@@ -285,6 +293,8 @@ class Wheel(QWidget):
             self._ticker.stop()
 
     def _set_hover(self, idx: int, centre: bool) -> None:
+        if idx >= 0:
+            self._touched = True
         if idx != self._hover or centre != self._center_hover:
             self._hover, self._center_hover = idx, centre
             self._ticker.start()
@@ -488,6 +498,7 @@ class Wheel(QWidget):
         self._set_hover(-1, False)
 
     def mousePressEvent(self, e):
+        self._touched = True
         self._pressed_inside = True
         if e.button() == Qt.RightButton:
             self._back()
@@ -506,6 +517,7 @@ class Wheel(QWidget):
             self.activate(idx)
 
     def keyPressEvent(self, e):
+        self._touched = True
         k = e.key()
         n = len(self._slices)
         number = _slice_number(e)

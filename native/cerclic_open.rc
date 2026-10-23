@@ -1,8 +1,8 @@
 #include <winver.h>
 1 ICON "../assets/cerclic.ico"
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0,2,0,0
-PRODUCTVERSION 0,2,0,0
+FILEVERSION 0,3,0,0
+PRODUCTVERSION 0,3,0,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -12,12 +12,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Said El Araifa"
       VALUE "FileDescription", "Cerclic, ouverture de la roue"
-      VALUE "FileVersion", "0.2.0"
+      VALUE "FileVersion", "0.3.0"
       VALUE "InternalName", "CerclicOpen"
       VALUE "LegalCopyright", "MIT"
       VALUE "OriginalFilename", "CerclicOpen.exe"
       VALUE "ProductName", "Cerclic"
-      VALUE "ProductVersion", "0.2.0"
+      VALUE "ProductVersion", "0.3.0"
     END
   END
   BLOCK "VarFileInfo"

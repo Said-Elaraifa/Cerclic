@@ -189,8 +189,8 @@ class ShortcutEdit(QWidget):
         self.change_btn.setText("Annuler")
         self.caps.active = True
         self.caps.set_parts([], "Appuie sur ta combinaison…")
-        self.set_status("Exemples : Ctrl + Alt + Espace, Ctrl + Maj + X, Win + Maj + C, "
-                        "F8. Échap pour annuler.", "accent")
+        self.set_status("Exemples : Ctrl + Alt + Espace, Ctrl + Maj + X, Win + Maj + C. "
+                        "Échap pour annuler.", "accent")
         self.setFocus(Qt.OtherFocusReason)
         self.grabKeyboard()
         self.capturing.emit(True)
@@ -328,11 +328,7 @@ class SettingsWindow(QWidget):
         root.addLayout(head)
 
         if welcome:
-            hello = QLabel("Bienvenue ! Cerclic tourne maintenant en fond, à côté de "
-                           "l'horloge. Sélectionne une image, un PDF, une vidéo ou un son, "
-                           "puis appuie sur ton raccourci (ou fais un clic droit, puis "
-                           "« Cerclic ») : la roue apparaît. Pour revenir ici, ouvre "
-                           "Cerclic depuis le Bureau ou le menu Démarrer.")
+            hello = QLabel(self._welcome_text(windows_11 and not classic_enabled))
             hello.setWordWrap(True)
             hello.setObjectName("welcome")
             root.addWidget(hello)
@@ -398,7 +394,7 @@ class SettingsWindow(QWidget):
         # --- quality and startup ---
         box, ql = _section("Qualité et démarrage")
         grid = QHBoxLayout()
-        grid.addWidget(QLabel("Compression des images"))
+        grid.addWidget(QLabel("Qualité des images compressées"))
         grid.addStretch(1)
         self.compress_q = _spin(10, 95, settings.get("compress_quality"), " %")
         self.compress_q.valueChanged.connect(lambda v: self._set("compress_quality", v))
@@ -459,6 +455,23 @@ class SettingsWindow(QWidget):
         self.resize(560, 700)
         self._apply_hotkey_status(None)
 
+    def _welcome_text(self, win11_menu: bool) -> str:
+        parts = ["Bienvenue ! Cerclic tourne maintenant en fond : son icône est près "
+                 "de l'horloge (parfois cachée sous la petite flèche ^)."]
+        how = []
+        if self.s.get("hotkey"):
+            how.append("appuie sur " + hk.label(int(self.s.get("hotkey_mods")),
+                                                int(self.s.get("hotkey_vk"))))
+        if self.s.get("context_menu"):
+            how.append("fais un clic droit, « Afficher d'autres options », puis « Cerclic »"
+                       if win11_menu else "fais un clic droit, puis « Cerclic »")
+        if how:
+            parts.append("Pour ouvrir la roue, sélectionne une image, un PDF, une vidéo "
+                         "ou un son, puis " + " ou ".join(how) + ".")
+        parts.append("Pour revenir ici, ouvre Cerclic depuis le Bureau ou le menu "
+                     "Démarrer.")
+        return " ".join(parts)
+
     # -- placing -----------------------------------------------------------------------
     def show_centered(self, near: QPoint | None = None) -> None:
         screen = (QGuiApplication.screenAt(near) if near is not None else None) \
@@ -491,9 +504,15 @@ class SettingsWindow(QWidget):
         self.shortcut.set_combo(mods, vk)
         self.changed.emit("hotkey_combo")
 
-    def set_hotkey_status(self, ok: bool | None) -> None:
+    def set_hotkey_status(self, ok: bool | None, note: str = "") -> None:
         """What the app learnt when registering the shortcut."""
+        if note:
+            self.shortcut.set_status(note, "error")
+            return
         self._apply_hotkey_status(ok)
+
+    def show_combo(self, mods: int, vk: int) -> None:
+        self.shortcut.set_combo(mods, vk)
 
     def _apply_hotkey_status(self, ok: bool | None) -> None:
         if not self.hotkey_on.isChecked():
@@ -505,8 +524,8 @@ class SettingsWindow(QWidget):
         elif ok:
             self.shortcut.set_status("✓ Actif partout dans Windows.", "ok")
         else:
-            self.shortcut.set_status("Une autre application utilise déjà cette "
-                                     "combinaison. Choisis-en une autre avec "
+            self.shortcut.set_status("Windows ou une autre application utilise déjà "
+                                     "cette combinaison. Choisis-en une autre avec "
                                      "« Modifier ».", "error")
 
     def classic_choice(self) -> bool | None:
@@ -549,6 +568,16 @@ class SettingsWindow(QWidget):
         self.refresh_signature()
 
     def _clear_signature(self) -> None:
+        """Forget the signature, and erase the picture Cerclic kept of it."""
+        path = self.s.get("signature")
+        from ..settings import config_dir
+        base = os.path.normcase(os.path.abspath(config_dir()))
+        mine = bool(path) and os.path.normcase(os.path.abspath(path)).startswith(base + os.sep)
+        if path and mine and os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
         self._set("signature", "")
         self.refresh_signature()
 

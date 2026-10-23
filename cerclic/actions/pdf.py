@@ -149,14 +149,45 @@ def render_page(src: str, index: int, max_w: int, max_h: int,
                 doc.page_count, (W, H), index)
 
 
+def quick_to_draw(src: str, max_content: int = 400_000,
+                  max_pixels: int = 40_000_000) -> bool:
+    """Whether the first page draws in a blink (the wheel shows it): not a plan
+    made of thousands of lines, nor a huge uncompressed scan; not protected."""
+    try:
+        with pymupdf.open(src) as doc:
+            if doc.needs_pass or doc.page_count == 0:
+                return False
+            page = doc[0]
+            drawing = list(page.get_contents()) + [x[0] for x in page.get_xobjects()]
+            size = 0
+            for x in drawing:                   # drawing instructions, unpacked
+                size += len(doc.xref_stream(x) or b"")
+                if size > max_content:
+                    return False
+            for img in page.get_images(full=True):
+                if img[8] != "DCTDecode" and img[2] * img[3] > max_pixels:
+                    return False
+            return True
+    except Exception:
+        return False
+
+
 # ----- raster <-> pdf ----------------------------------------------------------
+
+def _page_stem(src: str) -> str:
+    """Start of the name of each page file: the folder holding them already
+    carries the full name, so a long one is shortened (Windows paths have a
+    length limit)."""
+    stem = os.path.splitext(os.path.basename(src))[0]
+    return stem if len(stem) <= 40 else stem[:40].rstrip(" .-_")
+
 
 def pdf_to_images(src: str, fmt: str = "jpg", dpi: int = 150,
                   password: str | None = None, ctx=None) -> list[str]:
     """One image per page, written into a new folder '<name> (images)'."""
     from PIL import Image
     fmt = "jpg" if fmt.lower() in ("jpg", "jpeg") else "png"
-    stem = os.path.splitext(os.path.basename(src))[0]
+    stem = _page_stem(src)
     with open_pdf(src, password) as doc:
         out_dir = output_dir_for(src, "images")
         n = doc.page_count
@@ -179,27 +210,40 @@ def pdf_to_images(src: str, fmt: str = "jpg", dpi: int = 150,
 def images_to_pdf(srcs: Sequence[str], ctx=None) -> str:
     """Combine images (in the given order) into one PDF beside the first image.
     Each page keeps the image proportions, sized like an A4 sheet."""
-    from .images import load, _flatten
+    from .images import _flatten, _to_8bit, load, tiff_pages
     srcs = list(srcs)
     if not srcs:
         raise UserError("Aucune image.")
     out = output_for(srcs[0], "pdf", new_ext=".pdf")
+
+    def pictures(src):
+        """(image, has_alpha) for each page this file gives: every page of a
+        multi-page TIFF (scan, fax), one at a time."""
+        pic = load(src)
+        if pic.pages > 1:
+            del pic
+            yield from tiff_pages(src)
+        else:
+            yield pic.frames[0], pic.has_alpha
+
     doc = pymupdf.open()
     try:
         for i, src in enumerate(srcs):
-            check(ctx)
-            progress(ctx, i / len(srcs), f"Image {i + 1} sur {len(srcs)}")
-            pic = load(src)
-            im = pic.frames[0]
-            buf = io.BytesIO()
-            if pic.has_alpha:
-                im.convert("RGBA").save(buf, "PNG")
-            else:
-                _flatten(im).convert("RGB").save(buf, "JPEG", quality=90)
-            w, h = im.size
-            scale = A4_LONG_SIDE / max(w, h)
-            page = doc.new_page(width=w * scale, height=h * scale)
-            page.insert_image(page.rect, stream=buf.getvalue())
+            for im, alpha in pictures(src):
+                check(ctx)
+                progress(ctx, i / len(srcs), f"Image {i + 1} sur {len(srcs)}")
+                im = _to_8bit(im)
+                buf = io.BytesIO()
+                if alpha:
+                    im.convert("RGBA").save(buf, "PNG")
+                elif im.mode == "1":             # black and white scan: stays sharp
+                    im.save(buf, "PNG")
+                else:
+                    _flatten(im).convert("RGB").save(buf, "JPEG", quality=90)
+                w, h = im.size
+                scale = A4_LONG_SIDE / max(w, h)
+                page = doc.new_page(width=w * scale, height=h * scale)
+                page.insert_image(page.rect, stream=buf.getvalue())
         _save(doc, out, garbage=3, deflate=True)
     finally:
         doc.close()
@@ -208,7 +252,9 @@ def images_to_pdf(srcs: Sequence[str], ctx=None) -> str:
 
 # ----- combine / divide ---------------------------------------------------------
 
-def merge_pdfs(srcs: Sequence[str], password: str | None = None, ctx=None) -> str:
+def merge_pdfs(srcs: Sequence[str], password=None, ctx=None) -> str:
+    """One PDF made of all of them, in order. `password`: one for all, or a
+    {path: password} dict (each protected file may have its own)."""
     srcs = list(srcs)
     if len(srcs) < 2:
         raise UserError("Il faut au moins deux PDF pour fusionner.")
@@ -218,7 +264,8 @@ def merge_pdfs(srcs: Sequence[str], password: str | None = None, ctx=None) -> st
         for i, p in enumerate(srcs):
             check(ctx)
             progress(ctx, i / len(srcs), f"PDF {i + 1} sur {len(srcs)}")
-            with open_pdf(p, password) as part:
+            pw = password.get(p) if isinstance(password, dict) else password
+            with open_pdf(p, pw) as part:
                 doc.insert_pdf(part)
         doc.save(out, garbage=3, deflate=True)
     finally:
@@ -229,7 +276,7 @@ def merge_pdfs(srcs: Sequence[str], password: str | None = None, ctx=None) -> st
 def split_pdf(src: str, every: int = 1, password: str | None = None,
               ctx=None) -> list[str]:
     """Split into files of `every` pages (one file per page by default)."""
-    stem = os.path.splitext(os.path.basename(src))[0]
+    stem = _page_stem(src)
     with open_pdf(src, password) as doc:
         n = doc.page_count
         if n < 2:
@@ -659,7 +706,8 @@ def protect_pdf(src: str, password: str) -> str:
     if not password:
         raise UserError("Le mot de passe est vide.")
     if needs_password(src):
-        raise UserError("Ce PDF est déjà protégé par un mot de passe.")
+        raise UserError("Ce PDF a déjà un mot de passe. Pour en mettre un autre, "
+                        "retire d'abord celui-ci (Plus, puis Déverrouiller).")
     out = output_for(src, "protected", new_ext=".pdf")
     with pikepdf.open(src) as pdf:
         pdf.save(out, encryption=pikepdf.Encryption(owner=password, user=password, R=6))

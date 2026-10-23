@@ -14,6 +14,7 @@
 AppId={{B7E9B9B1-5C2A-4E2E-9E8A-CERCLIC00001}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
@@ -54,8 +55,13 @@ Name: "{userprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Cerclic"; ValueData: """{app}\{#MyAppExeName}"" --background"; Flags: uninsdeletevalue
+; An update keeps the user's choices (start with Windows, right-click entry off).
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Cerclic"; ValueData: """{app}\{#MyAppExeName}"" --background"; Flags: uninsdeletevalue; Check: SettingOn('autostart')
 #include "registry.iss"
+
+[UninstallDelete]
+; settings, handwritten signature, journal
+Type: filesandordirs; Name: "{userappdata}\Cerclic"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Lancer Cerclic"; Flags: nowait postinstall skipifsilent
@@ -86,9 +92,22 @@ begin
       Tries := Tries + 1;
     end;
   end;
-  { older versions, or a copy that did not answer }
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#MyAppExeName}', '', SW_HIDE,
-       ewWaitUntilTerminated, ResultCode);
+  { older versions, or a copy that did not answer (this account only) }
+  if Exec(ExpandConstant('{sys}\taskkill.exe'),
+          '/F /FI "USERNAME eq ' + GetUserNameString() + '" /IM {#MyAppExeName} /IM CerclicOpen.exe',
+          '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+    Sleep(1500);   { a stopped program releases its files a moment later }
+end;
+
+{ An update keeps what the user turned off in Cerclic (settings.json is
+  written by Cerclic with "key": true/false). }
+function SettingOn(Key: String): Boolean;
+var
+  Json: AnsiString;
+begin
+  Result := True;
+  if LoadStringFromFile(ExpandConstant('{userappdata}\Cerclic\settings.json'), Json) then
+    Result := Pos('"' + Key + '": false', Json) = 0;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -108,10 +127,16 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
 begin
   if CurUninstallStep = usUninstall then
   begin
     StopCerclic();
+    { what Cerclic itself added to Windows (right-click entry, start with
+      Windows, full Windows 11 menu if it turned it on) }
+    Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--cleanup', '', SW_HIDE,
+         ewWaitUntilTerminated, ResultCode);
     RemoveClassicMenuIfOurs();
   end;
 end;

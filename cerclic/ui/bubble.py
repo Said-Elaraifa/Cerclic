@@ -63,14 +63,17 @@ class PromptBubble(QWidget):
             self.eye = QPushButton("Afficher")
             self.eye.setObjectName("ghost")
             self.eye.setCheckable(True)
+            self.eye.setFocusPolicy(Qt.NoFocus)      # the typing stays in the field
             self.eye.toggled.connect(self._toggle_echo)
             row.addWidget(self.eye)
         row.addStretch(1)
         cancel = QPushButton("Annuler")
         cancel.setObjectName("ghost")
+        cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
         self.ok = QPushButton(ok_label)
         self.ok.setObjectName("primary")
+        self.ok.setFocusPolicy(Qt.NoFocus)
         self.ok.clicked.connect(self._accept)
         row.addWidget(cancel)
         row.addWidget(self.ok)
@@ -143,5 +146,7 @@ class PromptBubble(QWidget):
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
             self.cancel()
+        elif e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self._accept()
         else:
             super().keyPressEvent(e)

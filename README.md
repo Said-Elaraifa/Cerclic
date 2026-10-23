@@ -20,15 +20,15 @@ d'autre application.
 
 La roue s'ouvre sous ta souris, avec un aperçu du fichier au centre. Passe sur
 une action pour voir ce qu'elle fait, clique pour la lancer, clique au centre
-pour revenir, Échap pour fermer. Les touches 1 à 9 et les flèches marchent
-aussi.
+pour revenir, Échap pour fermer. Au clavier : les touches 1 à 8 (depuis le
+haut, dans le sens des aiguilles d'une montre), ou les flèches puis Entrée.
 
 ## Ce que Cerclic sait faire
 
 Tout se passe dans de petites fenêtres qui s'ouvrent là où était la roue, à la
 taille de ton image. Ton fichier d'origine n'est jamais modifié : chaque
 résultat est un nouveau fichier à côté, par exemple `photo (compressed).jpg`,
-et « Annuler » sur la carte de résultat le supprime.
+et « Supprimer » sur la carte de résultat l'efface si tu n'en veux pas.
 
 **Images** (JPG, PNG, WEBP, HEIC d'iPhone, AVIF, GIF, BMP, TIFF) : rogner
 (formats 1:1, 4:5, 16:9…), pivoter ou retourner en miroir, redimensionner,
@@ -41,6 +41,7 @@ date… sans aucune perte de qualité pour les JPG et PNG).
 souris), rogner, compresser, fusionner, organiser les pages (trier, tourner,
 supprimer, extraire), convertir en Word, en images ou en texte, diviser,
 pivoter, filigrane, numéros de page, protéger par mot de passe, déverrouiller.
+Un PDF protégé ? Cerclic demande son mot de passe (un par fichier si besoin).
 
 **Vidéo** : raccourcir (garder un passage, avec l'image sous les yeux),
 compresser, convertir en MP4 lisible partout, en GIF, extraire le son, couper
@@ -55,28 +56,38 @@ Une barre montre l'avancement, « Arrêter » interrompt proprement.
 
 Télécharge `CerclicSetup-x.y.z.exe` et lance-le : pas de droits
 administrateur, pas de Python à installer, rien à configurer. Cerclic démarre
-avec Windows et se range près de l'horloge.
+avec Windows et se range près de l'horloge (parfois sous la petite flèche ^).
+Une mise à jour s'installe par-dessus et garde tes réglages.
 
 Windows peut afficher « Windows a protégé votre ordinateur » car l'application
 n'est pas encore signée numériquement : clique sur « Informations
 complémentaires », puis « Exécuter quand même ».
 
 Une version portable (`Cerclic-x.y.z-portable.zip`) est aussi fournie :
-décompresse-la où tu veux et double-clique sur `Cerclic.exe`.
+décompresse-la où tu veux et double-clique sur `Cerclic.exe`. Elle n'ajoute rien
+à Windows : le raccourci clavier marche tout de suite, le clic droit et le
+démarrage avec Windows s'activent dans ses réglages (décoche-les avant de
+supprimer son dossier).
 
 ## Réglages
 
 Ouvre Cerclic depuis son icône (Bureau ou menu Démarrer), ou clique sur son
 icône près de l'horloge : raccourci clavier (clique sur « Modifier » puis
 appuie sur ta combinaison), entrée du clic droit, menu complet de Windows 11,
-signature, qualité, démarrage avec Windows. Tout s'applique tout de suite.
+signature, qualité, démarrage avec Windows. Tout s'applique tout de suite. Si
+la combinaison choisie est déjà prise par Windows ou une autre application,
+Cerclic le dit et garde l'ancienne.
+
+Astuce : une souris à boutons programmables peut envoyer les touches F13 à F24,
+acceptées seules comme raccourci. La roue s'ouvre alors d'un clic de ce bouton.
 
 En cas de souci, le journal `cerclic.log` se trouve dans `%APPDATA%\Cerclic`.
 
 ## Désinstaller
 
 Paramètres Windows, Applications, Cerclic, Désinstaller. Tout ce que Cerclic a
-ajouté (entrée du clic droit, démarrage automatique) est retiré.
+ajouté est retiré : entrée du clic droit, démarrage automatique, menu complet
+de Windows 11 s'il l'avait activé, réglages et signature.
 
 ## Pour les développeurs
 
@@ -84,7 +95,7 @@ ajouté (entrée du clic droit, démarrage automatique) est retiré.
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements-dev.txt
-pytest                      # 190+ tests : actions, interface, communication
+pytest                      # 210+ tests : actions, interface, communication
 pythonw run_cerclic.py      # lancer depuis le code
 ```
 

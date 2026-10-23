@@ -456,7 +456,7 @@ class SignPlacer(EditorWindow):
         from .crop_editor import load_pdf_preview
         self._token += 1
         token = self._token
-        dpr = self.devicePixelRatioF() or 1.0
+        dpr = self.dpr()
         w = max(64, int((self.canvas.width() - 2 * PLACE_MARGIN) * dpr))
         h = max(64, int((self.canvas.height() - 2 * PLACE_MARGIN) * dpr))
         index = self.page if self.page >= 0 else 10 ** 6
@@ -476,7 +476,10 @@ class SignPlacer(EditorWindow):
             return
         self.page, self.page_count = index, count
         self.canvas.page_img = img
+        before = self.canvas.page_size
         self.canvas.page_size = size
+        if self._placed and before and tuple(before) != tuple(size):
+            self._refit_box(before, size)     # a page of another size or shape
         if not self._placed and self.canvas.sig_img is not None:
             from ..actions.pdf import default_signature_box
             x0, y0, x1, y1 = default_signature_box(size[0], size[1],
@@ -487,6 +490,20 @@ class SignPlacer(EditorWindow):
         self._update_nav()
         self.ok.setEnabled(self.canvas.sig_img is not None)
         self.canvas.update()
+
+    def _refit_box(self, before, size) -> None:
+        """Keep the signature as wide (in points) and on the same line when the
+        page changes size, with its own proportions (never squashed)."""
+        img = self.canvas.sig_img
+        if img is None:
+            return
+        b = self.canvas.box
+        pw, (W, H) = before[0], size
+        w = min(0.9, b.width() * pw / max(1.0, W))
+        h = w * (img.height() / max(1, img.width())) * (W / max(1.0, H))
+        if h > 0.9:
+            w, h = w * 0.9 / h, 0.9
+        self.canvas.box = self.canvas._clamp(QRectF(b.left(), b.bottom() - h, w, h))
 
     def _update_nav(self) -> None:
         index = self.page if self.page >= 0 else self.page_count - 1

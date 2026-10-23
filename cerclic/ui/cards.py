@@ -23,7 +23,9 @@ GAP = 6
 def open_path(path: str) -> None:
     try:
         if os.name == "nt":
-            os.startfile(path)  # noqa: S606 - opens with the default app
+            from ..sysenv import outside_env
+            with outside_env():
+                os.startfile(path)  # noqa: S606 - opens with the default app
         elif sys.platform == "darwin":
             subprocess.Popen(["open", path])
         else:
@@ -35,7 +37,9 @@ def open_path(path: str) -> None:
 def reveal_path(path: str) -> None:
     try:
         if os.name == "nt":
-            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+            from ..sysenv import clean_env, neutral_dir
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)],
+                             env=clean_env(), cwd=neutral_dir())
         elif sys.platform == "darwin":
             subprocess.Popen(["open", "-R", path])
         else:
@@ -142,7 +146,10 @@ class Card(QWidget):
             f"#card{{background:{SURFACE};border:1px solid {BORDER};border-radius:14px;}}"
             f"#head{{color:{self._accent};font-size:14px;font-weight:700;}}"
             f"#sub{{color:{MUTED};font-size:12px;}}"
-            f"QLabel{{color:{TEXT};}}" + BUTTON_QSS)
+            f"QLabel{{color:{TEXT};}}" + BUTTON_QSS +
+            f"QPushButton#closeCard{{background:transparent;color:{MUTED};padding:0;"
+            "font-size:12px;border-radius:7px;border:none;}"
+            f"QPushButton#closeCard:hover{{background:{BORDER};color:{TEXT};}}")
 
     def set_accent(self, accent: str) -> None:
         self._accent = accent
@@ -190,7 +197,10 @@ class MessageCard(Card):
                  buttons: list[tuple[str, object]] | None = None, auto_ms: int = 8000):
         accent = {"info": ACCENT, "ok": OK, "error": ERROR, "warn": WARN}.get(kind, ACCENT)
         super().__init__(accent)
-        self.body.addWidget(_head(title))
+        top = QHBoxLayout()
+        top.addWidget(_head(title), 1)
+        top.addWidget(_close_button(self), 0, Qt.AlignTop)
+        self.body.addLayout(top)
         if text:
             self.body.addWidget(_sub(text))
         if buttons:
@@ -214,6 +224,25 @@ class MessageCard(Card):
             fn()
 
 
+def _close_button(card: "Card") -> QPushButton:
+    b = QPushButton("✕")
+    b.setObjectName("closeCard")
+    b.setToolTip("Fermer")
+    b.setFixedSize(26, 24)
+    b.setFocusPolicy(Qt.NoFocus)
+    b.clicked.connect(card.close)
+    return b
+
+
+def _elided(label: QLabel, text: str, width: int) -> str:
+    """A long file name shortened in the middle, whole in the tooltip."""
+    fm = label.fontMetrics()
+    if fm.horizontalAdvance(text) <= width:
+        return text
+    label.setToolTip(text)
+    return fm.elidedText(text, Qt.ElideMiddle, width)
+
+
 class JobCard(Card):
     """Progress of one action, then its result."""
     cancel_requested = Signal()
@@ -228,6 +257,7 @@ class JobCard(Card):
         self._stop.setObjectName("ghost")
         self._stop.clicked.connect(self._on_stop)
         top.addWidget(self._stop)
+        self._top = top
         self.body.addLayout(top)
         self._status = _sub("En cours")
         self.body.addWidget(self._status)
@@ -251,13 +281,16 @@ class JobCard(Card):
         self._bar.stop()
         self._bar.hide()
         self._stop.hide()
+        close = _close_button(self)
+        self._top.addWidget(close, 0, Qt.AlignTop)
+        close.show()
         self._outputs = list(result.outputs)
         if result.ok:
             self.set_accent(OK)
             self._head.setText("✓  " + self._title)
             n = len(self._outputs)
-            text = (os.path.basename(self._outputs[0]) if n == 1
-                    else f"{n} fichiers créés")
+            text = (_elided(self._status, os.path.basename(self._outputs[0]), 290)
+                    if n == 1 else f"{n} fichiers créés")
             self._status.setText(text + (f"\n{note}" if note else ""))
             row = QHBoxLayout()
             row.setSpacing(8)
@@ -266,22 +299,24 @@ class JobCard(Card):
             b_open.clicked.connect(self._open)
             b_dir = QPushButton("Dossier")
             b_dir.clicked.connect(self._reveal)
-            b_undo = QPushButton("Annuler")
+            b_undo = QPushButton("Supprimer")
             b_undo.setObjectName("ghost")
-            b_undo.setToolTip("Supprimer ce que Cerclic vient de créer")
+            b_undo.setToolTip("Supprime ce que Cerclic vient de créer (ton fichier "
+                              "d'origine ne bouge pas)")
             b_undo.clicked.connect(self._undo)
             row.addWidget(b_open)
             row.addWidget(b_dir)
             row.addStretch(1)
             row.addWidget(b_undo)
             self.body.addLayout(row)
-            for b in (b_open, b_dir, b_undo):
+            self._buttons = (b_open, b_dir, b_undo)
+            for b in self._buttons:
                 b.show()
             self.start_auto_close(8000)
         elif result.cancelled:
             self.set_accent(MUTED)
-            self._head.setText(self._title + " : arrêté")
-            self._status.setText("Rien n'a été créé.")
+            self._head.setText(self._title)
+            self._status.setText("Arrêté : rien n'a été créé.")
             self.start_auto_close(3500)
         elif result.info:
             self.set_accent(ACCENT)
@@ -290,7 +325,7 @@ class JobCard(Card):
             self.start_auto_close(6000)
         else:
             self.set_accent(ERROR)
-            self._head.setText("✕  " + self._title + " a échoué")
+            self._head.setText("✕  " + self._title + " impossible")
             self._status.setText(result.error or "Erreur inconnue.")
             self.start_auto_close(12000)
         self.adjustSize()
@@ -310,7 +345,16 @@ class JobCard(Card):
 
     def _undo(self):
         undo_outputs(self._outputs)
-        self.close()
+        for b in getattr(self, "_buttons", ()):
+            b.hide()
+        self.set_accent(MUTED)
+        n = len(self._outputs)
+        self._head.setText("Fichier supprimé" if n == 1 else "Fichiers supprimés")
+        self._status.setToolTip("")
+        self._status.setText("Ton fichier d'origine n'a pas bougé.")
+        self._outputs = []
+        self.adjustSize()
+        self.start_auto_close(2500)
 
 
 class CardStack(QObject):

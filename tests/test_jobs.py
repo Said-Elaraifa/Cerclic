@@ -5,9 +5,8 @@ import threading
 import time
 
 import pymupdf
-import pytest
 
-from cerclic import engine, jobs
+from cerclic import jobs
 from cerclic.journal import Journal
 
 
@@ -61,6 +60,8 @@ def test_should_isolate(pdf_3p, pdf_with_photo, jpg_photo, monkeypatch):
     assert not jobs.should_isolate("pdf_compress", [pdf_3p])
     assert not jobs.should_isolate("img_compress", [jpg_photo])
     monkeypatch.setattr(jobs, "ISOLATE_BYTES", 1000)
+    assert jobs.should_isolate("pdf_rotate", [pdf_with_photo])
+    monkeypatch.setattr(jobs, "RENDERING_BYTES", 1000)
     assert jobs.should_isolate("pdf_compress", [pdf_with_photo])
 
 

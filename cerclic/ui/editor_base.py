@@ -10,8 +10,7 @@ from __future__ import annotations
 import itertools
 import threading
 
-from PySide6.QtCore import (QEasingCurve, QObject, QPoint, QPropertyAnimation,
-                            QRect, QSize, Qt, QTimer, Signal)
+from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QImage
 from PySide6.QtWidgets import (QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout, QWidget)
@@ -87,6 +86,10 @@ class Loader(QObject):
                 res, err = call(key), None
             except Exception as exc:  # shown in the editor, never raised
                 from ..engine import friendly_error
+                from ..errors import Cancelled, UserError
+                if not isinstance(exc, (Cancelled, UserError)):
+                    from ..log import log_exception
+                    log_exception("aperçu")
                 res, err = None, friendly_error(exc)
             hub.done.emit(key, res, err)
         threading.Thread(target=work, daemon=True, name="cerclic-load").start()
@@ -97,7 +100,8 @@ def qimage_from_rgb(data: bytes, w: int, h: int, stride: int) -> QImage:
 
 
 def qimage_from_pil(im) -> QImage:
-    im = im.convert("RGBA")
+    from ..actions.images import _to_8bit
+    im = _to_8bit(im).convert("RGBA")       # 16-bit grey would turn white
     data = im.tobytes("raw", "RGBA")
     return QImage(data, im.width, im.height, im.width * 4,
                   QImage.Format_RGBA8888).copy()
@@ -121,19 +125,24 @@ def fit_view(content_w: float, content_h: float, room_w: float, room_h: float,
     return max(1, round(w)), max(1, round(h))
 
 
-def popup_rect(anchor: QPoint, size: QSize, avail: QRect) -> QRect:
-    """Where a popup of `size` (shadow margin included) goes: centred on the
-    anchor, its card kept EDGE px inside the available screen area."""
-    w, h = size.width(), size.height()
-    x = anchor.x() - w // 2
-    y = anchor.y() - h // 2
+def clamp_rect(rect: QRect, avail: QRect) -> QRect:
+    """`rect` (shadow margin included) moved as little as needed for its card
+    to stay EDGE px inside the available screen area."""
+    w, h = rect.width(), rect.height()
     lo_x = avail.left() + EDGE - SHADOW
     hi_x = avail.right() + 1 - EDGE + SHADOW - w
     lo_y = avail.top() + EDGE - SHADOW
     hi_y = avail.bottom() + 1 - EDGE + SHADOW - h
-    x = max(lo_x, min(x, hi_x)) if hi_x >= lo_x else lo_x
-    y = max(lo_y, min(y, hi_y)) if hi_y >= lo_y else lo_y
+    x = max(lo_x, min(rect.x(), hi_x)) if hi_x >= lo_x else lo_x
+    y = max(lo_y, min(rect.y(), hi_y)) if hi_y >= lo_y else lo_y
     return QRect(x, y, w, h)
+
+
+def popup_rect(anchor: QPoint, size: QSize, avail: QRect) -> QRect:
+    """Where a popup of `size` (shadow margin included) goes: centred on the
+    anchor, its card kept EDGE px inside the available screen area."""
+    w, h = size.width(), size.height()
+    return clamp_rect(QRect(anchor.x() - w // 2, anchor.y() - h // 2, w, h), avail)
 
 
 class EditorWindow(QWidget):
@@ -216,20 +225,25 @@ class EditorWindow(QWidget):
 
         self._guard = DismissGuard(self, self.cancel, leave_s=45.0, idle_s=900.0,
                                    keep_once_used=True)
-        self._fade = QPropertyAnimation(self, b"windowOpacity", self)
-        self._fade.setDuration(130)
-        self._fade.setStartValue(0.0)
-        self._fade.setEndValue(1.0)
-        self._fade.setEasingCurve(QEasingCurve.OutCubic)
+        # (no window-opacity fade: on a see-through window some systems leave it
+        # half transparent; the popup simply appears, at once)
 
     # -- sizing and placing -----------------------------------------------------------
-    def room(self, max_w: int = 600, max_h: int = 470) -> tuple[int, int]:
+    def room(self, max_w: int = 600, max_h: int = 470,
+             screen_share: float = 0.6) -> tuple[int, int]:
         """Content area for this popup: a small window by default, never more
         than the screen comfortably allows (tools and buttons take ~190 px)."""
         avail = screen_for(self.anchor).availableGeometry()
-        w = min(max_w, int(avail.width() * 0.6))
+        w = min(max_w, int(avail.width() * screen_share))
         h = min(max_h, int(avail.height() - 190 - 2 * EDGE))
         return max(240, w), max(160, h)
+
+    def dpr(self) -> float:
+        """Pixel ratio of the screen the popup opens on (before it is shown)."""
+        try:
+            return float(screen_for(self.anchor).devicePixelRatio()) or 1.0
+        except Exception:
+            return 1.0
 
     def chip(self, label: str, checkable: bool = True) -> QPushButton:
         b = QPushButton(label)
@@ -244,13 +258,11 @@ class EditorWindow(QWidget):
             self.anchor = QPoint(anchor)
         self.adjustSize()
         self.place()
-        self.setWindowOpacity(0.0)
         self.show()
         self.raise_()
         self.activateWindow()
         bring_to_front(int(self.winId()))
         self.setFocus(Qt.PopupFocusReason)
-        self._fade.start()
         self._guard.start()
         QTimer.singleShot(120, self._refocus)   # Windows may hand over late
 
@@ -266,6 +278,19 @@ class EditorWindow(QWidget):
         self.resize(self.sizeHint())
         if self.isVisible():
             self.place()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self.isVisible():        # grew after opening (a longer label...)
+            QTimer.singleShot(0, self._keep_on_screen)
+
+    def _keep_on_screen(self) -> None:
+        if self._done or not self.isVisible():
+            return
+        g = self.geometry()
+        r = clamp_rect(g, screen_for(self.anchor).availableGeometry())
+        if r.topLeft() != g.topLeft():
+            self.move(r.topLeft())
 
     def _refocus(self) -> None:
         if self._done or not self.isVisible():

@@ -19,7 +19,7 @@ def render() -> str:
              "; Right-click entry \"Cerclic\" for each supported file type (per user)."]
     for ext in sorted(SUPPORTED_EXTS):
         key = rf"Software\Classes\SystemFileAssociations\{ext}\shell\Cerclic"
-        lines += [
+        entries = [
             f'Root: HKCU; Subkey: "{key}"; Flags: uninsdeletekey',
             f'Root: HKCU; Subkey: "{key}"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Cerclic"',
             f'Root: HKCU; Subkey: "{key}"; ValueType: string; ValueName: "Icon"; ValueData: "{{app}}\\Cerclic.exe,0"',
@@ -28,6 +28,8 @@ def render() -> str:
             f'Root: HKCU; Subkey: "{key}\\command"; ValueType: string; ValueName: ""; '
             f'ValueData: """{{app}}\\CerclicOpen.exe"" ""%1"""',
         ]
+        # an update keeps the entry off if the user turned it off
+        lines += [e + "; Check: SettingOn('context_menu')" for e in entries]
     return "\r\n".join(lines) + "\r\n"
 
 

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 from ..paths import kind_of
 from .editor_base import EditorWindow, Loader, fit_view
-from .theme import ACCENT, FONT_FAMILY, MUTED, TEXT
+from .theme import FONT_FAMILY, MUTED, TEXT
 
 STRIP_FRAMES = 8
 HANDLE_W = 10
@@ -313,6 +313,8 @@ class TrimEditor(EditorWindow):
             self.track.message = err or "Durée illisible : fichier endommagé ?"
             self.track.update()
             return
+        if self.is_video and not info.has_video and info.has_audio:
+            self._sound_only()          # a sound in a video file (.webm, .mp4)
         self.track.set_duration(info.duration)
         self.ok.setEnabled(True)
         self._changed("start")
@@ -325,7 +327,7 @@ class TrimEditor(EditorWindow):
                               min_side=160, max_scale=10)
             self.frame.setFixedSize(QSize(fw, fh))
             self.refit()
-        dpr = self.devicePixelRatioF() or 1.0
+        dpr = self.dpr()
         if self.is_video:
             h = int(52 * dpr)
             dur = info.duration
@@ -337,7 +339,7 @@ class TrimEditor(EditorWindow):
                         return
                     t = dur * (i + 0.5) / STRIP_FRAMES
                     try:
-                        data = _video.frame_png(path, t, int(h * 1.8), h)
+                        data = _video.frame_png(path, t, int(h * 1.8), h, should_stop=stop)
                     except Exception:
                         continue
                     report((i, QImage.fromData(data, "PNG")))
@@ -346,7 +348,21 @@ class TrimEditor(EditorWindow):
             self._request_frame()
         else:
             w, h = int(self.track.width() * dpr), int(80 * dpr)
-            self._wave.run(lambda: _video.waveform_png(path, w, h, color="#B79BFF"))
+            stop = self._wave.stop_event.is_set      # closing the popup stops ffmpeg
+            self._wave.run(lambda: _video.waveform_png(path, w, h, color="#B79BFF",
+                                                       should_stop=stop))
+
+    def _sound_only(self) -> None:
+        """Show it as a sound: no picture, the waveform instead."""
+        self.is_video = False
+        if self.frame is not None:
+            self.frame.hide()
+            self.center.removeWidget(self.frame)
+            self.frame.deleteLater()
+            self.frame = None
+        self.track.color = QColor("#A66BFF")
+        self.track.setFixedSize(QSize(self.track.width(), 92))
+        self.refit()
 
     def _strip_part(self, payload) -> None:
         i, img = payload
@@ -376,13 +392,14 @@ class TrimEditor(EditorWindow):
             return
         t, self._frame_want = self._frame_want, None
         self._frame_busy = True
-        dpr = self.devicePixelRatioF() or 1.0
+        dpr = self.dpr()
         w, h = int(self.frame.width() * dpr), int(self.frame.height() * dpr)
         if t >= self.track.duration - 0.05:          # the very end has no frame
             t = max(0.0, self.track.duration - 0.1)
         from ..actions import video as _video
         path = self.path
-        self._frames.run(lambda: _video.frame_png(path, t, w, h))
+        stop = self._frames.stop_event.is_set
+        self._frames.run(lambda: _video.frame_png(path, t, w, h, should_stop=stop))
 
     def _frame_ready(self, data, err) -> None:
         self._frame_busy = False
