@@ -127,13 +127,6 @@ jobs:
           path: dist_installer/*
           retention-days: 30
 
-      - name: Publish release (on tag)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist_installer/*
-          generate_release_notes: true
-
   build-mac:
     # Cerclic.app and its disk image, built by the same script as on a Mac
     # (Apple silicon). For Intel Macs, add a runner such as macos-15-intel.
@@ -151,8 +144,26 @@ jobs:
           path: dist/*.dmg
           retention-days: 30
 
-      - name: Publish release (on tag)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  release:
+    # One release, once both systems are built, with a fixed name per system:
+    # releases/latest/download/Cerclic-Windows.exe (or Cerclic-Mac.dmg) always
+    # gives the newest version.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, build-mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          files: dist/*.dmg
+          path: out
+          merge-multiple: true
+
+      - name: Fixed names for the download links
+        run: |
+          cp out/CerclicSetup-*.exe out/Cerclic-Windows.exe
+          cp out/Cerclic-*-mac-arm64.dmg out/Cerclic-Mac.dmg
+          ls -la out
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
