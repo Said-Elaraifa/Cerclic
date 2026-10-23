@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
 from ..paths import kind_of
 from .editor_base import (EditorWindow, Loader, fit_view, qimage_from_pil,
                           qimage_from_rgb)
+from ..system import ENTER_KEY
 from .theme import MUTED, font
 
 PRESETS = [("Libre", None), ("Original", "orig"), ("1:1", 1.0), ("4:5", 4 / 5),
@@ -415,7 +416,8 @@ class CropEditor(EditorWindow):
     def __init__(self, path: str, password: str | None = None):
         self.path = path
         self.is_pdf = kind_of(path) == "pdf"
-        super().__init__(os.path.basename(path), "Glisse les coins · Entrée pour rogner")
+        super().__init__(os.path.basename(path),
+                         f"Glisse les coins · {ENTER_KEY} pour rogner")
         self.password = password
         self.canvas = CropCanvas()
         self.canvas.changed.connect(self._sync)
@@ -456,7 +458,7 @@ class CropEditor(EditorWindow):
             self.bar.addSpacing(6)
             self.bar.addWidget(self.all_pages)
         else:
-            reset = QPushButton("Tout")
+            reset = QPushButton("Image entière")
             reset.setObjectName("ghost")
             reset.setToolTip("Reprendre toute l'image")
             reset.setFocusPolicy(Qt.NoFocus)

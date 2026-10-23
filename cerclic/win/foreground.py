@@ -2,14 +2,19 @@
 
 Windows lets a process take the foreground right after the user acted on it:
 the right-click entry grants it through AllowSetForegroundWindow (see
-launcher.py) and the keyboard shortcut grants it by itself.
+launcher.py) and the keyboard shortcut grants it by itself. On macOS, the
+application itself is made active (mac/foreground.py).
 """
 from __future__ import annotations
 
 import os
+import sys
 
 
 def bring_to_front(hwnd: int) -> bool:
+    if sys.platform == "darwin":                 # the whole application comes forward
+        from ..mac.foreground import activate
+        return activate()
     if os.name != "nt" or not hwnd:
         return False
     import ctypes

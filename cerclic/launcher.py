@@ -1,9 +1,11 @@
 """Process entry point.
 
-Cerclic runs as one resident process per Windows session (the tray icon). Every
-later launch (right-click entry, shortcut double-click, files dropped on the
-icon, the installer) hands its request to that process over a local pipe and
-exits. This module only uses the standard library, so the hand-off is quick.
+Cerclic runs as one resident process per user session (the tray icon on
+Windows, the menu bar icon on macOS). Every later launch (right-click entry,
+shortcut double-click, files dropped on the icon, the installer) hands its
+request to that process over a local pipe (a local socket on macOS) and exits.
+This module only uses the standard library, so the hand-off is quick. (On
+macOS, the system itself sends files to the running Cerclic: see app.py.)
 
 Protocol (UTF-8 lines):  CERCLIC/1, <command>, <path>..., END   -> reply "OK".
 """
@@ -46,9 +48,10 @@ def parse_args(argv: list[str]) -> tuple[str, list[str]]:
        Cerclic.exe --background   -> ("background", [])   (start with Windows)
        Cerclic.exe --open a b     -> ("open", [a, b])
        Cerclic.exe a b            -> ("open", [a, b])      (files dropped on it)
-       --settings, --quit, --cleanup"""
+       --settings, --quit, --cleanup, --selftest"""
     flags = {"--open": "open", "--settings": "settings", "--quit": "quit",
-             "--cleanup": "cleanup", "--background": "background"}
+             "--cleanup": "cleanup", "--background": "background",
+             "--selftest": "selftest"}
     cmd = "hello"
     paths: list[str] = []
     for a in argv:
@@ -256,11 +259,17 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "cleanup":  # called by the uninstaller
         send("quit", [], timeout=2.0)
         try:
-            from .win.shell import cleanup
+            if sys.platform == "darwin":
+                from .mac.integration import cleanup
+            else:
+                from .win.shell import cleanup
             cleanup()
         except Exception:
             pass
         return 0
+    if cmd == "selftest":  # checks the packaged Cerclic (no window)
+        from .selftest import run
+        return run()
 
     if send(cmd, paths):
         if cmd == "quit":       # the installer waits for Cerclic to be gone

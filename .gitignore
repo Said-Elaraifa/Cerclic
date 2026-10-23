@@ -13,6 +13,7 @@ dist_installer/
 assets/ffmpeg/
 native/*.res
 ffw/
+.outils/
 
 # Scratch previews
 scripts/preview_*.png

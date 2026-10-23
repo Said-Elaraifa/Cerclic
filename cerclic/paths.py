@@ -14,6 +14,31 @@ import re
 import threading
 
 _track = threading.local()
+_out = threading.local()
+
+
+@contextlib.contextmanager
+def output_folder(folder: str | None):
+    """Results of the actions run in this block (this thread) go to `folder`;
+    None: beside each original, as by default."""
+    previous = getattr(_out, "folder", None)
+    _out.folder = folder or None
+    try:
+        yield
+    finally:
+        _out.folder = previous
+
+
+def _home_of(src: str) -> str:
+    """The folder a result of `src` goes to."""
+    chosen = getattr(_out, "folder", None)
+    if chosen:
+        try:
+            os.makedirs(chosen, exist_ok=True)
+            return chosen
+        except OSError:
+            pass                         # unplugged drive...: beside the original
+    return os.path.dirname(os.path.abspath(src))
 
 
 @contextlib.contextmanager
@@ -99,8 +124,9 @@ def clean_selection(paths) -> list[str]:
         key = os.path.normcase(p)
         if key in seen or not os.path.isfile(p):
             continue
-        if "$recycle.bin" in key.replace("\\", "/").lower().split("/"):
-            continue        # an item of the Recycle Bin (named $R...): not a real file
+        parts = key.replace("\\", "/").lower().split("/")
+        if "$recycle.bin" in parts or ".trash" in parts:
+            continue        # an item of the Recycle Bin or of the Trash: not to work on
         seen.add(key)
         out.append(p)
     out.sort(key=lambda p: (natural_key(p), p.lower()))
@@ -127,6 +153,7 @@ def _reserve_dir(path: str) -> bool:
 
 
 MAX_NAME = 180     # characters kept from a long file name (Windows allows 255)
+MAX_NAME_BYTES = 200   # macOS and Linux count bytes (UTF-8, 255 at most): é takes 2
 
 
 def _windows_downloads() -> str | None:
@@ -169,7 +196,27 @@ def fallback_folder() -> str:
 
 
 def _short(stem: str) -> str:
-    return stem if len(stem) <= MAX_NAME else stem[:MAX_NAME].rstrip(" .")
+    cut = stem if len(stem) <= MAX_NAME else stem[:MAX_NAME]
+    if os.name != "nt":
+        while len(cut.encode("utf-8", "surrogateescape")) > MAX_NAME_BYTES:
+            cut = cut[:-1]
+    return stem if cut == stem else cut.rstrip(" .")
+
+
+# What a result's name says it is: '<name> (<this>)'. Format names (jpg, pdf,
+# mp3...) stay as they are; the words are in French, agreeing with "fichier".
+TAG_NAMES = {
+    "compressed": "compressé", "resized": "redimensionné", "rotated": "pivoté",
+    "cropped": "rogné", "mirrored": "miroir", "clean": "anonymisé",
+    "assembled": "assemblé", "merged": "fusionné", "organized": "réorganisé",
+    "extract": "extrait", "text": "texte", "watermark": "filigrane",
+    "numbered": "numéroté", "signed": "signé", "protected": "protégé",
+    "unlocked": "déverrouillé", "audio": "son", "cut": "raccourci", "muted": "sans son",
+}
+
+
+def tag_name(tag: str) -> str:
+    return TAG_NAMES.get(tag, tag)
 
 
 def unique_path(folder: str, stem: str, ext: str, tag: str | None = None) -> str:
@@ -178,7 +225,7 @@ def unique_path(folder: str, stem: str, ext: str, tag: str | None = None) -> str
     if ext and not ext.startswith("."):
         ext = "." + ext
     stem = _short(stem)
-    base = stem if not tag else f"{stem} ({tag})"
+    base = stem if not tag else f"{stem} ({tag_name(tag)})"
     n = 1
     while True:
         name = base if n == 1 else f"{base} ({n})"
@@ -218,7 +265,7 @@ def _with_fallback(reserve, folder: str):
 def output_for(src: str, tag: str, new_ext: str | None = None) -> str:
     """Reserved path next to src for a derived file (in Downloads if that
     folder cannot be written to). Keeps src extension unless new_ext is given."""
-    folder = os.path.dirname(os.path.abspath(src))
+    folder = _home_of(src)
     stem = os.path.splitext(os.path.basename(src))[0]
     ext = new_ext or ext_of(src)
     return _with_fallback(lambda f: unique_path(f, stem, ext, tag), folder)
@@ -227,13 +274,14 @@ def output_for(src: str, tag: str, new_ext: str | None = None) -> str:
 def output_dir_for(src: str, tag: str) -> str:
     """New folder next to src, named '<stem> (<tag>)' (in Downloads if that
     folder cannot be written to)."""
-    folder = os.path.dirname(os.path.abspath(src))
+    folder = _home_of(src)
     stem = os.path.splitext(os.path.basename(src))[0]
-    return _with_fallback(lambda f: unique_dir(f, f"{_short(stem)} ({tag})"), folder)
+    return _with_fallback(lambda f: unique_dir(f, f"{_short(stem)} ({tag_name(tag)})"),
+                          folder)
 
 
 def sibling_path(src: str, name: str) -> str:
     """Reserved path for an explicitly named sibling."""
-    folder = os.path.dirname(os.path.abspath(src))
+    folder = _home_of(src)
     stem, ext = os.path.splitext(name)
     return _with_fallback(lambda f: unique_path(f, stem, ext or ".dat"), folder)

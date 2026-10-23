@@ -1,4 +1,4 @@
-name: Build Cerclic (Windows)
+name: Build Cerclic (Windows et Mac)
 
 on:
   push:
@@ -46,6 +46,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+          # PyInstaller's starter compiled here from its sources (antivirus
+          # programs know the ready-made one, which malware authors use too)
+          $env:PYINSTALLER_COMPILE_BOOTLOADER = "1"
+          pip install --force-reinstall --no-deps --no-binary pyinstaller pyinstaller==6.22.3
 
       - name: ffmpeg (from the imageio-ffmpeg wheel)
         shell: pwsh
@@ -105,3 +109,26 @@ jobs:
         with:
           files: dist_installer/*
           generate_release_notes: true
+
+  build-mac:
+    # Cerclic.app and its disk image, built by the same script as on a Mac
+    # (Apple silicon). For Intel Macs, add a runner such as macos-15-intel.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Cerclic.app and the disk image (with its self-test)
+        run: bash scripts/build_mac.sh --no-install --no-open
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cerclic-mac
+          path: dist/*.dmg
+          retention-days: 30
+
+      - name: Publish release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg

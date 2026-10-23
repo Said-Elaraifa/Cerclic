@@ -3,10 +3,12 @@
 ## Vue d'ensemble
 
 ```
-run_cerclic.py            point d'entrée de Cerclic.exe (et de pythonw)
+run_cerclic.py            point d'entrée de Cerclic.exe, de Cerclic.app (et de python)
 native/cerclic_open.c     CerclicOpen.exe, le petit programme du clic droit (C, 50 ko)
 cerclic/
   launcher.py             instance unique, transmission des demandes (bibliothèque standard seule)
+  system.py               ce qui change entre Windows et macOS (module du raccourci, mots)
+  selftest.py             « Cerclic --selftest » : vérifie une application construite
   app.py                  l'instance résidente : icône, serveur de demandes, roue, éditeurs, tâches
   engine.py               lance une action, renvoie un résultat, ne lève jamais d'exception
   jobs.py                 sur un thread, ou dans un processus à part pour les PDF lourds
@@ -14,14 +16,19 @@ cerclic/
   sysenv.py               environnement et dossier de travail des programmes lancés pour l'utilisateur
   errors.py               erreurs prévues (mot de passe, rien à faire, annulation)
   paths.py                noms de sortie réservés atomiquement, jamais d'écrasement
-  settings.py  log.py     réglages JSON et journal dans %APPDATA%\Cerclic
+  settings.py  log.py     réglages JSON et journal (%APPDATA%\Cerclic, ~/Library/Application Support/Cerclic)
   actions/                traitements purs, testés partout
     images.py  pdf.py  video.py  registry.py  common.py
   win/                    Windows uniquement
     shell.py              entrée du clic droit, démarrage avec Windows, menu complet de Windows 11
     hotkey.py             raccourci clavier choisi par l'utilisateur (RegisterHotKey) et ses règles
     selection.py          fichiers sélectionnés dans la fenêtre au premier plan (Shell.Application)
-    foreground.py         mise au premier plan
+    foreground.py         mise au premier plan (sur Mac : mac/foreground.py)
+  mac/                    macOS uniquement (s'importe partout, ne touche macOS qu'à l'appel)
+    hotkey.py             raccourci clavier (RegisterEventHotKey de Carbon) et ses règles
+    selection.py          fichiers sélectionnés dans le Finder (AppleScript)
+    integration.py        action rapide « Cerclic » du Finder, ouverture à la connexion
+    foreground.py         passe Cerclic au premier plan (NSApplication)
   ui/                     PySide6
     radial.py             la roue (catégories, actions, « Plus », variantes, aperçu au centre)
     dismiss.py            fermeture de la roue, des bulles et des popups quand on va ailleurs
@@ -33,8 +40,11 @@ cerclic/
     trim_editor.py        découpe d'une vidéo ou d'un son
     cards.py              progression puis résultat, en bas à droite
     settings_window.py    la fenêtre de Cerclic : raccourci (enregistreur), clic droit, signature...
-    theme.py  icons.py  trayicon.py
+    glass.py              verre givré : fond pastel, cartes, interrupteurs, barre latérale
+    theme.py  logo.py  icons.py  trayicon.py
 installer/cerclic.iss     installateur Inno Setup (par utilisateur, sans droits administrateur)
+cerclic_mac.spec          Cerclic.app (application de la barre des menus, LSUIElement)
+scripts/build_mac.sh      construit, vérifie et installe Cerclic.app sur un Mac, fait le .dmg
 ```
 
 ## Comment la roue s'ouvre
@@ -74,6 +84,29 @@ travaillé dedans, un clic ailleurs ne les ferme plus (Échap ou Annuler).
 Lancer Cerclic depuis son icône (Bureau, menu Démarrer) ou cliquer sur son
 icône près de l'horloge ouvre sa fenêtre de réglages.
 
+## Sur Mac
+
+- **Application de la barre des menus** (`LSUIElement`), sans icône dans le
+  Dock. Réglages dans `~/Library/Application Support/Cerclic`.
+- **Clic droit** : une action rapide Automator, `~/Library/Services/
+  Cerclic.workflow`, réécrite à chaque démarrage pour pointer vers l'endroit
+  où se trouve Cerclic.app. Elle lance `open -a Cerclic.app <fichiers>` :
+  macOS envoie les fichiers à Cerclic comme des documents à ouvrir
+  (`QFileOpenEvent`, un par fichier), regroupés en une seule roue. « Ouvrir
+  avec » et les fichiers glissés sur l'icône passent par le même chemin
+  (`CFBundleDocumentTypes`, rang `Alternate` : jamais l'application par défaut).
+- **Raccourci clavier** : `RegisterEventHotKey`, l'équivalent de
+  `RegisterHotKey` ; macOS ne prévient Cerclic que pour cette combinaison, sans
+  autorisation d'accessibilité. Cerclic demande ensuite au Finder sa sélection
+  (AppleScript), seulement si le Finder est au premier plan ; macOS demande
+  une fois l'autorisation (Automatisation).
+- **Ouverture à la connexion** : `~/Library/LaunchAgents/
+  com.jannahmarketing.cerclic.plist` (`open -g -a … --args --background`).
+- **Construire** : sur le Mac lui-même, `scripts/build_mac.sh` (outils
+  d'Apple, uv, Python 3.12, PyInstaller, signature ad hoc, vérification
+  `--selftest`, image disque). Les versions de pikepdf et OpenCV s'adaptent à
+  la version de macOS (`requirements-mac.txt`).
+
 Instance unique : un mutex `Local\Cerclic.Resident` par session ; deux comptes
 Windows ouverts en même temps ont chacun leur Cerclic.
 
@@ -112,8 +145,11 @@ Windows ouverts en même temps ont chacun leur Cerclic.
 `pytest` : chaque action sur de vrais fichiers (EXIF, HEIC, GIF animés, PDF
 protégés, vidéos aux dimensions impaires, annulation...), la roue, les
 bulles, les éditeurs et le parcours complet demande, roue, action, carte,
-hors écran ; le protocole de transmission. Le build Windows est en plus essayé
-sous Wine : roue, rognage, signature, fusion, filigrane, installation.
+hors écran ; le protocole de transmission ; les parties macOS (règles du
+raccourci, fichiers de l'action rapide et de la connexion, fichiers envoyés
+par macOS, réglages tels qu'ils s'affichent sur Mac). Le build Windows est en
+plus essayé sous Wine : roue, rognage, signature, fusion, filigrane,
+installation, et `--selftest`.
 
 ## Construire
 
@@ -122,6 +158,14 @@ compiler `native/cerclic_open.c` avec mingw-w64, copier `ffmpeg.exe` dans
 `assets/ffmpeg/`, `pyinstaller cerclic.spec`, copier `CerclicOpen.exe` dans
 `dist/Cerclic/`, puis `ISCC installer/cerclic.iss`. Depuis Linux :
 `scripts/build_windows.sh` (Wine, mingw-w64).
+
+Le programme de démarrage de PyInstaller (bootloader) est recompilé depuis ses
+sources à chaque version de PyInstaller (mingw-w64 depuis Linux, MSVC dans le
+workflow) : les antivirus connaissent celui livré tout fait, que des logiciels
+malveillants utilisent aussi. Pas d'UPX, informations de version et manifeste
+renseignés. Seule une signature de code supprime l'avertissement SmartScreen.
+
+Sur Mac : `bash scripts/build_mac.sh` (voir « Sur Mac »).
 
 Après un changement de la liste des extensions prises en charge :
 `python scripts/gen_installer_registry.py` (un test le vérifie).

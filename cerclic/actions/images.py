@@ -4,7 +4,8 @@ private information, assemble several pictures into one.
 Every function takes a source path and returns the path it wrote, always a new
 file beside the source. Results are upright (EXIF orientation applied), keep the
 colour profile and EXIF data, and animations (GIF, WEBP) keep all their frames.
-HEIC/HEIF photos are read through pillow-heif; AVIF is native in Pillow.
+HEIC/HEIF photos are read through pi-heif (decoder only, LGPL); AVIF is native
+in Pillow.
 """
 from __future__ import annotations
 
@@ -22,11 +23,16 @@ from ..paths import ext_of, output_for
 Image.MAX_IMAGE_PIXELS = 1_000_000_000
 
 try:  # optional at import time so the tests can run without it
-    import pillow_heif  # type: ignore
-    pillow_heif.register_heif_opener()
+    import pi_heif  # type: ignore  (reads HEIC; no encoder, so no GPL x265 inside)
+    pi_heif.register_heif_opener()
     _HEIF = True
 except Exception:  # pragma: no cover
-    _HEIF = False
+    try:
+        import pillow_heif  # type: ignore
+        pillow_heif.register_heif_opener()
+        _HEIF = True
+    except Exception:
+        _HEIF = False
 
 # Output formats we write: (Pillow format, canonical extension).
 FORMATS = {

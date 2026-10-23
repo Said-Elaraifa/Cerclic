@@ -1,7 +1,7 @@
 # Cerclic runtime dependencies. Versions are pinned so every build is identical.
 PySide6-Essentials==6.8.3
 Pillow==12.3.0
-pillow-heif==1.8.1
+pi-heif==1.4.0            # reads iPhone HEIC photos (decoder only: LGPL, no x265)
 pymupdf==1.28.2
 pikepdf==10.17.0
 pdf2docx==0.5.13          # PDF to Word; pulls numpy, opencv, python-docx, fonttools

@@ -10,12 +10,13 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 from ..paths import kind_of
 from .editor_base import EditorWindow, Loader, fit_view
-from .theme import FONT_FAMILY, MUTED, TEXT
+from ..system import ENTER_KEY
+from .theme import MUTED, TEXT, base_font
 
 STRIP_FRAMES = 8
 HANDLE_W = 10
@@ -166,7 +167,7 @@ class TrimTrack(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         lane = self._lane()
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#11131A"))
+        p.setBrush(QColor("#E3E9F2"))
         p.drawRoundedRect(lane, 6, 6)
         if self.strip:
             n = len(self.strip)
@@ -184,13 +185,13 @@ class TrimTrack(QWidget):
             p.drawImage(lane, self.wave)
         if not self.duration:
             p.setPen(QColor(MUTED))
-            f = QFont(FONT_FAMILY)
+            f = base_font()
             f.setPixelSize(12)
             p.setFont(f)
             p.drawText(lane, Qt.AlignCenter, self.message)
             return
         xs, xe = self.x_of(self.start), self.x_of(self.end)
-        shade = QColor(8, 9, 12, 185)
+        shade = QColor(244, 247, 252, 205)        # what is cut off, washed out
         p.setBrush(shade)
         p.drawRect(QRectF(lane.left(), lane.top(), xs - lane.left(), lane.height()))
         p.drawRect(QRectF(xe, lane.top(), lane.right() - xe, lane.height()))
@@ -230,7 +231,7 @@ class _Frame(QWidget):
             p.drawImage(QRectF(r.center().x() - w / 2, r.center().y() - h / 2, w, h),
                         self.image)
         if self.caption:
-            f = QFont(FONT_FAMILY)
+            f = base_font()
             f.setPixelSize(12)
             f.setBold(True)
             p.setFont(f)
@@ -238,7 +239,7 @@ class _Frame(QWidget):
             box = QRectF(r.left() + 8, r.bottom() - 30, tw, 22)
             p.setBrush(QColor(0, 0, 0, 150))
             p.drawRoundedRect(box, 6, 6)
-            p.setPen(QColor(TEXT))
+            p.setPen(QColor("white"))
             p.drawText(box, Qt.AlignCenter, self.caption)
 
 
@@ -249,8 +250,8 @@ class TrimEditor(EditorWindow):
         self.path = path
         self.is_video = kind_of(path) == "video"
         super().__init__(os.path.basename(path),
-                         "Tire les poignées · Entrée pour raccourcir")
-        color = "#17B890" if self.is_video else "#A66BFF"
+                         f"Tire les poignées · {ENTER_KEY} pour raccourcir")
+        color = "#10A37F" if self.is_video else "#8B5CF6"
         self.frame = _Frame() if self.is_video else None
         if self.frame is not None:
             self.center.addWidget(self.frame, 0, Qt.AlignCenter)
@@ -350,7 +351,7 @@ class TrimEditor(EditorWindow):
         else:
             w, h = int(self.track.width() * dpr), int(80 * dpr)
             stop = self._wave.stop_event.is_set      # closing the popup stops ffmpeg
-            self._wave.run(lambda: _video.waveform_png(path, w, h, color="#B79BFF",
+            self._wave.run(lambda: _video.waveform_png(path, w, h, color="#7C5CE0",
                                                        should_stop=stop))
 
     def _sound_only(self) -> None:
@@ -361,7 +362,7 @@ class TrimEditor(EditorWindow):
             self.center.removeWidget(self.frame)
             self.frame.deleteLater()
             self.frame = None
-        self.track.color = QColor("#A66BFF")
+        self.track.color = QColor("#8B5CF6")
         self.track.setFixedSize(QSize(self.track.width(), 92))
         self.refit()
 

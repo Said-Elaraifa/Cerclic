@@ -116,7 +116,7 @@ def run(action_id: str, paths: list[str], opts: dict | None = None,
     action = registry.get(action_id)
     ctx = Context(on_progress, cancel)
     t0 = time.perf_counter()
-    with _paths.tracking() as reserved:
+    with _paths.tracking() as reserved, _paths.output_folder(opts.get("_out_dir")):
         try:
             gone = [p for p in paths if not os.path.exists(p)]
             if gone:

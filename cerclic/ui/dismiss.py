@@ -24,13 +24,16 @@ class DismissGuard(QObject):
     GRACE_S = 1.5
 
     def __init__(self, widget, on_dismiss, leave_s: float = 2.5, idle_s: float = 60.0,
-                 keep_once_used: bool = False):
+                 keep_once_used: bool = False, sticky: bool = False):
         super().__init__(widget)
         self.widget, self.on_dismiss = widget, on_dismiss
         self.leave_s, self.idle_s = leave_s, idle_s
         # An editor the user already worked in is not thrown away by a click
         # elsewhere (only by Escape, its buttons, or a long inactivity).
         self.keep_once_used = keep_once_used
+        # A question that may need something from another window (a password to
+        # copy from a mail) only goes on Escape, its buttons or a long inactivity.
+        self.sticky = sticky
         self._shown = self._activity = time.monotonic()
         self._left_at: float | None = None
         self._touched = False      # the user pressed inside the popup
@@ -89,7 +92,7 @@ class DismissGuard(QObject):
             return
         if not visible or QGuiApplication.applicationState() == Qt.ApplicationActive:
             return
-        if self.keep_once_used and self._touched:
+        if self.sticky or (self.keep_once_used and self._touched):
             return
         early = time.monotonic() - self._shown < self.GRACE_S and not self._touched
         if early:
@@ -112,6 +115,6 @@ class DismissGuard(QObject):
         if now - self._activity > self.idle_s:
             self._dismiss("inactivité")
         elif (not active and self._left_at is not None
-              and now - self._left_at > self.leave_s
+              and now - self._left_at > self.leave_s and not self.sticky
               and not (self.keep_once_used and self._touched)):
             self._dismiss("pointeur parti")

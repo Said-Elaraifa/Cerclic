@@ -25,10 +25,10 @@ from .common import check, progress
 
 # Category ids, French labels and ring colours.
 CATEGORIES = {
-    "image": ("Image", "#4C8DFF"),
-    "pdf": ("PDF", "#FF5A5F"),
-    "video": ("Vidéo", "#17B890"),
-    "audio": ("Son", "#A66BFF"),
+    "image": ("Image", "#2E7CF6"),
+    "pdf": ("PDF", "#EF4E52"),
+    "video": ("Vidéo", "#10A37F"),
+    "audio": ("Son", "#8B5CF6"),
 }
 
 
@@ -154,7 +154,7 @@ ACTIONS: list[Action] = [
            desc="À coller où tu veux", title="Copie"),
     Action("img_to_pdf", "En PDF", "image", frozenset({"image"}),
            lambda paths, o, ctx: [pdf.images_to_pdf(paths, ctx=ctx)],
-           icon="topdf", desc="Une page par image", title="Création du PDF"),
+           icon="cat_pdf", desc="Une page par image", title="Création du PDF"),
     Action("img_assemble", "Assembler", "image", frozenset({"image"}),
            lambda paths, o, ctx: [images.assemble_images(
                paths, o.get("layout", "row"), _q(o), ctx=ctx)],

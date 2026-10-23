@@ -9,9 +9,9 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
-from .theme import FONT_FAMILY
+from .theme import base_font
 
 _TEXT_GLYPHS = {
     "jpg": "JPG", "png": "PNG", "webp": "WEBP", "mp4": "MP4", "gif": "GIF",
@@ -20,7 +20,7 @@ _TEXT_GLYPHS = {
 
 
 def _label(p: QPainter, text: str, cx: float, cy: float, size: float) -> None:
-    f = QFont(FONT_FAMILY)
+    f = base_font()
     f.setPixelSize(max(6, int(size * (0.62 if len(text) <= 2 else 0.42))))
     f.setBold(True)
     p.setFont(f)
@@ -243,6 +243,76 @@ def draw_icon(p: QPainter, name: str, cx: float, cy: float, size: float,
     elif name == "close":
         p.drawLine(QPointF(cx - r * 0.6, cy - r * 0.6), QPointF(cx + r * 0.6, cy + r * 0.6))
         p.drawLine(QPointF(cx + r * 0.6, cy - r * 0.6), QPointF(cx - r * 0.6, cy + r * 0.6))
+    # ----- settings window -----
+    elif name == "gear":
+        for k in range(8):
+            a = math.radians(k * 45)
+            p.drawLine(QPointF(cx + r * 0.62 * math.cos(a), cy + r * 0.62 * math.sin(a)),
+                       QPointF(cx + r * 0.95 * math.cos(a), cy + r * 0.95 * math.sin(a)))
+        p.drawEllipse(QPointF(cx, cy), r * 0.62, r * 0.62)
+        p.drawEllipse(QPointF(cx, cy), r * 0.22, r * 0.22)
+    elif name == "keyboard":
+        p.drawRoundedRect(QRectF(cx - r, cy - r * 0.62, size, r * 1.24), 2, 2)
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        for row, n in ((-0.25, 4), (0.12, 3)):
+            for k in range(n):
+                x = cx - r * 0.62 + k * (r * 1.24 / max(1, n - 1)) if n > 1 else cx
+                p.drawEllipse(QPointF(x, cy + row * r), size * 0.045, size * 0.045)
+        p.drawRoundedRect(QRectF(cx - r * 0.45, cy + r * 0.32, r * 0.9, size * 0.07), 1, 1)
+    elif name == "menu":
+        p.drawRoundedRect(QRectF(cx - r * 0.85, cy - r * 0.9, r * 1.7, r * 1.8), 2.5, 2.5)
+        for k in (-0.4, 0.0, 0.4):
+            p.drawLine(QPointF(cx - r * 0.45, cy + k * r), QPointF(cx + r * 0.45, cy + k * r))
+    elif name == "folder":
+        path = QPainterPath()
+        path.moveTo(cx - r, cy - r * 0.55)
+        path.lineTo(cx - r * 0.25, cy - r * 0.55)
+        path.lineTo(cx - r * 0.05, cy - r * 0.3)
+        path.lineTo(cx + r, cy - r * 0.3)
+        path.lineTo(cx + r, cy + r * 0.7)
+        path.lineTo(cx - r, cy + r * 0.7)
+        path.closeSubpath()
+        p.drawPath(path)
+    elif name == "sliders":
+        for k, pos in ((-0.5, 0.35), (0.0, -0.4), (0.5, 0.1)):
+            y = cy + k * r * 1.2
+            p.drawLine(QPointF(cx - r, y), QPointF(cx + r, y))
+            p.setBrush(color)
+            p.drawEllipse(QPointF(cx + pos * r, y), size * 0.1, size * 0.1)
+            p.setBrush(Qt.NoBrush)
+    elif name == "info":
+        p.drawEllipse(QPointF(cx, cy), r * 0.95, r * 0.95)
+        p.drawLine(QPointF(cx, cy - r * 0.05), QPointF(cx, cy + r * 0.5))
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        p.drawEllipse(QPointF(cx, cy - r * 0.42), size * 0.06, size * 0.06)
+    elif name == "pen":
+        p.drawLine(QPointF(cx - r * 0.75, cy + r * 0.75), QPointF(cx + r * 0.55, cy - r * 0.55))
+        p.drawLine(QPointF(cx + r * 0.35, cy - r * 0.75), QPointF(cx + r * 0.75, cy - r * 0.35))
+        p.drawLine(QPointF(cx - r * 0.75, cy + r * 0.75), QPointF(cx - r * 0.95, cy + r * 0.95))
+    elif name == "mouse":
+        p.drawRoundedRect(QRectF(cx - r * 0.6, cy - r * 0.95, r * 1.2, r * 1.9), r * 0.6, r * 0.6)
+        p.drawLine(QPointF(cx, cy - r * 0.95), QPointF(cx, cy - r * 0.3))
+    elif name == "chevron":                       # "go there", pointing right
+        p.drawLine(QPointF(cx - r * 0.25, cy - r * 0.55), QPointF(cx + r * 0.3, cy))
+        p.drawLine(QPointF(cx + r * 0.3, cy), QPointF(cx - r * 0.25, cy + r * 0.55))
+    elif name == "drop":                          # an arrow coming down into a tray
+        p.drawLine(QPointF(cx, cy - r * 0.95), QPointF(cx, cy + r * 0.25))
+        _arrow_head(p, QPointF(cx, cy + r * 0.25), -90, r * 0.45)
+        path = QPainterPath(QPointF(cx - r * 0.9, cy + r * 0.15))
+        path.lineTo(QPointF(cx - r * 0.9, cy + r * 0.85))
+        path.lineTo(QPointF(cx + r * 0.9, cy + r * 0.85))
+        path.lineTo(QPointF(cx + r * 0.9, cy + r * 0.15))
+        p.drawPath(path)
+    elif name in ("eye", "eye_off"):
+        path = QPainterPath(QPointF(cx - r * 0.95, cy))
+        path.quadTo(QPointF(cx, cy - r * 0.95), QPointF(cx + r * 0.95, cy))
+        path.quadTo(QPointF(cx, cy + r * 0.95), QPointF(cx - r * 0.95, cy))
+        p.drawPath(path)
+        p.drawEllipse(QPointF(cx, cy), r * 0.28, r * 0.28)
+        if name == "eye_off":
+            p.drawLine(QPointF(cx - r * 0.8, cy + r * 0.8), QPointF(cx + r * 0.8, cy - r * 0.8))
     else:
         p.setPen(Qt.NoPen)
         p.setBrush(color)

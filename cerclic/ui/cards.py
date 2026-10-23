@@ -15,7 +15,8 @@ from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter
 from PySide6.QtWidgets import (QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout, QWidget)
 
-from .theme import ACCENT, BORDER, BUTTON_QSS, ERROR, MUTED, OK, SURFACE, TEXT, WARN
+from .theme import (ACCENT, ACCENT_STRONG, BORDER, BUTTON_QSS, ERROR, MUTED, OK, TEXT,
+                    WARN, card_qss)
 
 GAP = 6
 
@@ -114,13 +115,14 @@ class Card(QWidget):
     closed = Signal(object)
     resized = Signal()
 
-    def __init__(self, accent: str = ACCENT, auto_ms: int = 0):
+    def __init__(self, accent: str = ACCENT_STRONG, auto_ms: int = 0):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool
                          | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus
                          | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)   # macOS: stays shown in the background
         self.setWindowTitle("Cerclic")
         self.screen_hint = QGuiApplication.screenAt(QCursor.pos()) or \
             QGuiApplication.primaryScreen()
@@ -138,7 +140,7 @@ class Card(QWidget):
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(30)
         shadow.setOffset(0, 8)
-        shadow.setColor(QColor(0, 0, 0, 150))
+        shadow.setColor(QColor(20, 40, 90, 64))
         self._card.setGraphicsEffect(shadow)
         self._timer = QTimer(self, singleShot=True)
         self._timer.timeout.connect(self.close)
@@ -146,7 +148,7 @@ class Card(QWidget):
 
     def _restyle(self):
         self.setStyleSheet(
-            f"#card{{background:{SURFACE};border:1px solid {BORDER};border-radius:14px;}}"
+            card_qss(14) +
             f"#head{{color:{self._accent};font-size:14px;font-weight:700;}}"
             f"#sub{{color:{MUTED};font-size:12px;}}"
             f"QLabel{{color:{TEXT};}}" + BUTTON_QSS +
@@ -198,7 +200,8 @@ def _sub(text: str) -> QLabel:
 class MessageCard(Card):
     def __init__(self, title: str, text: str = "", kind: str = "info",
                  buttons: list[tuple[str, object]] | None = None, auto_ms: int = 8000):
-        accent = {"info": ACCENT, "ok": OK, "error": ERROR, "warn": WARN}.get(kind, ACCENT)
+        accent = {"info": ACCENT_STRONG, "ok": OK, "error": ERROR,
+                  "warn": WARN}.get(kind, ACCENT_STRONG)
         super().__init__(accent)
         top = QHBoxLayout()
         top.addWidget(_head(title), 1)
@@ -237,6 +240,18 @@ def _close_button(card: "Card") -> QPushButton:
     return b
 
 
+_KNOWN = {"desktop": "Bureau", "downloads": "Téléchargements", "pictures": "Images",
+          "videos": "Vidéos", "movies": "Vidéos", "music": "Musique",
+          "documents": "Documents"}
+
+
+def folder_label(outputs: list[str]) -> str:
+    """Where the results are, as the file manager names that folder."""
+    d = os.path.dirname(os.path.abspath(outputs[0]))
+    name = os.path.basename(d.rstrip("\\/")) or d
+    return _KNOWN.get(name.lower(), name)
+
+
 def _elided(label: QLabel, text: str, width: int) -> str:
     """A long file name shortened in the middle, whole in the tooltip."""
     fm = label.fontMetrics()
@@ -251,7 +266,7 @@ class JobCard(Card):
     cancel_requested = Signal()
 
     def __init__(self, title: str):
-        super().__init__(ACCENT)
+        super().__init__(ACCENT_STRONG)
         self._title = title
         top = QHBoxLayout()
         self._head = _head(title + "…")
@@ -294,6 +309,10 @@ class JobCard(Card):
             n = len(self._outputs)
             text = (_elided(self._status, os.path.basename(self._outputs[0]), 290)
                     if n == 1 else f"{n} fichiers créés")
+            where = folder_label(self._outputs)
+            text += "\nDans\u00a0«\u00a0" + where + "\u00a0»"
+            if n == 1 and not self._status.toolTip():
+                self._status.setToolTip(self._outputs[0])
             notes = list(getattr(result, "notes", []) or [])
             if len(notes) > 1:
                 note = (note + "\n" if note else "") + (
@@ -309,7 +328,7 @@ class JobCard(Card):
             b_dir = QPushButton("Dossier")
             b_dir.clicked.connect(self._reveal)
             b_undo = QPushButton("Supprimer")
-            b_undo.setObjectName("ghost")
+            b_undo.setObjectName("danger")
             b_undo.setToolTip("Supprime ce que Cerclic vient de créer (ton fichier "
                               "d'origine ne bouge pas)")
             b_undo.clicked.connect(self._undo)
@@ -328,7 +347,7 @@ class JobCard(Card):
             self._status.setText("Arrêté : rien n'a été créé.")
             self.start_auto_close(3500)
         elif result.info:
-            self.set_accent(ACCENT)
+            self.set_accent(ACCENT_STRONG)
             self._head.setText(self._title)
             self._status.setText(result.error)
             self.start_auto_close(6000)

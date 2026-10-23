@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import (QEventLoop, QObject, QPoint, Qt, QTimer, Signal,
+from PySide6.QtCore import (QEvent, QEventLoop, QObject, QPoint, Qt, QTimer, Signal,
                             qInstallMessageHandler)
 from PySide6.QtGui import QCursor
 from PySide6.QtNetwork import QLocalServer
@@ -23,6 +23,7 @@ from .actions import registry
 from .log import log, log_exception, log_path
 from .paths import clean_selection, fallback_folder, kind_of, natural_key
 from .settings import Settings
+from .system import FILES_APP, IS_MAC, IS_WINDOWS, MOD_KEY, OS_NAME, hotkey_supported, hotkeys
 
 # A right-click on many files starts one forwarder per file: paths arriving
 # less than MERGE_GAP s after the previous one join the wheel already open.
@@ -47,10 +48,16 @@ def _summary(paths: list[str]) -> str:
     return f"{len(paths)} fichiers"
 
 
-def _elsewhere_note(sources: list[str], outputs: list[str]) -> str:
-    """Say so when results could not go next to the original (protected folder)."""
+def _elsewhere_note(sources: list[str], outputs: list[str], chosen: str | None = None) -> str:
+    """Say so when results could not go where they should: next to the
+    original (protected folder), or in the chosen folder (gone)."""
     if not sources or not outputs:
         return ""
+    if chosen:
+        base = os.path.normcase(os.path.abspath(chosen))
+        if all(os.path.normcase(os.path.abspath(o)).startswith(base + os.sep)
+               for o in outputs):
+            return ""
     folders = {os.path.normcase(os.path.dirname(os.path.abspath(s))) for s in sources}
 
     def beside(out: str) -> bool:
@@ -64,7 +71,8 @@ def _elsewhere_note(sources: list[str], outputs: list[str]) -> str:
         return False
 
     if all(beside(o) for o in outputs):
-        return ""
+        return "Le dossier choisi est introuvable : enregistré à côté de l'original." \
+            if chosen else ""
     fb = fallback_folder()
     where = os.path.basename(fb.rstrip("\\/")) or fb
     where = {"downloads": "Téléchargements"}.get(where.lower(), where)  # as Explorer shows it
@@ -159,6 +167,29 @@ class Bridge(QObject):
     hotkey = Signal()
     hotkey_status = Signal(int, bool)     # (registration number, ok)
     selection = Signal(int, list)
+    finder_refused = Signal(int)          # macOS: not allowed to ask the Finder
+
+
+class FileOpenApp(QApplication):
+    """macOS sends the files of the Finder's Quick Action, of « Ouvrir avec » and
+    of a drop on Cerclic's icon as FileOpen events to the application, one per
+    file. They are kept until Cerclic is ready (`on_file` set), then handed over."""
+
+    def __init__(self, argv):
+        super().__init__(argv)
+        self.early_files: list[str] = []
+        self.on_file = None
+
+    def event(self, e):
+        if e.type() == QEvent.FileOpen:
+            path = e.file() or e.url().toLocalFile()
+            if path:
+                if self.on_file is not None:
+                    self.on_file(path)
+                else:
+                    self.early_files.append(path)
+            return True
+        return super().event(e)
 
 
 class Job(QObject):
@@ -257,11 +288,11 @@ class WheelSession:
             pass
 
     def _chosen(self, action_id: str, opts: dict) -> None:
-        self.close()
+        self.close(chosen=True)
         self.paths.sort(key=lambda p: (natural_key(p), p.lower()))
         self.app.start_action(action_id, self.paths, opts, self.pos)
 
-    def close(self) -> None:
+    def close(self, chosen: bool = False) -> None:
         if self.closed:
             return
         self.closed = True
@@ -272,6 +303,8 @@ class WheelSession:
             pass
         if self.app.session is self:
             self.app.session = None
+        if not chosen:
+            self.app.focus_back_later()
 
 
 # ----- application ----------------------------------------------------------------------
@@ -312,10 +345,22 @@ class CerclicApp(QObject):
         self.bridge.hotkey.connect(self._on_hotkey, Qt.QueuedConnection)
         self.bridge.hotkey_status.connect(self._on_hotkey_status, Qt.QueuedConnection)
         self.bridge.selection.connect(self._on_selection, Qt.QueuedConnection)
+        self.bridge.finder_refused.connect(self._on_finder_refused, Qt.QueuedConnection)
 
         self.server = RequestServer(launcher.server_name())
         self.server.request.connect(self.handle_request)
-        self._quit_window = _QuitWindow(self.quit)
+        # The installer closes this hidden window to stop Cerclic (Windows).
+        self._quit_window = _QuitWindow(self.quit) if IS_WINDOWS else None
+        # Files sent by macOS (Quick Action, Ouvrir avec, drop on the icon).
+        self.files_received = False
+        self._opened: list[str] = []
+        self._opened_timer = QTimer(self, singleShot=True, interval=150)
+        self._opened_timer.timeout.connect(self._open_received)
+        if isinstance(qapp, FileOpenApp):
+            qapp.on_file = self._file_opened
+            for path in qapp.early_files:
+                self._file_opened(path)
+            qapp.early_files.clear()
         self._build_tray()
         self.apply_integration()
 
@@ -333,8 +378,8 @@ class CerclicApp(QObject):
 
     # -- tray ------------------------------------------------------------------------
     def _build_tray(self) -> None:
-        from .ui.trayicon import make_icon
-        self.tray = QSystemTrayIcon(make_icon(), self.qapp)
+        from .ui.trayicon import make_tray_icon
+        self.tray = QSystemTrayIcon(make_tray_icon(), self.qapp)
         self.tray.setToolTip(f"{APP_NAME} {__version__}")
         menu = QMenu()
         menu.addAction("Ouvrir Cerclic", self.open_settings)
@@ -346,6 +391,8 @@ class CerclicApp(QObject):
         self._menu = menu
 
     def _tray_activated(self, reason) -> None:
+        if IS_MAC:
+            return              # a click on the menu bar icon shows its menu
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             self.open_settings()
 
@@ -356,8 +403,10 @@ class CerclicApp(QObject):
         self._apply_hotkey()
 
     def _apply_shell(self) -> None:
-        if os.environ.get("CERCLIC_NO_INTEGRATION"):   # tests: leave Windows alone
+        if os.environ.get("CERCLIC_NO_INTEGRATION"):   # tests: leave the system alone
             return
+        if IS_MAC:
+            self._apply_mac()
         if os.name == "nt":
             from .win import shell
             # (The portable version only ever removes what points to itself:
@@ -379,16 +428,43 @@ class CerclicApp(QObject):
             except Exception:
                 log_exception("démarrage avec Windows : échec")
 
+    def _apply_mac(self) -> None:
+        """The Finder's Quick Action and opening at login, rewritten at each start
+        so that they point to where Cerclic.app is now."""
+        from .mac import integration as mac
+        if mac.app_bundle() is None:                   # running from the sources
+            return
+        try:
+            if self.settings.get("context_menu"):
+                mac.install_quick_action()
+            else:
+                mac.remove_quick_action()
+        except Exception:
+            log_exception("action rapide du Finder")
+        try:
+            mac.set_autostart(bool(self.settings.get("autostart")))
+        except Exception:
+            log_exception("ouverture à la connexion")
+
+    def uninstall_mac(self) -> None:
+        """Take Cerclic out of macOS, then quit (Cerclic.app goes to the Trash next)."""
+        try:
+            from .mac.integration import cleanup
+            cleanup()
+            log("Cerclic retiré du Finder et de l'ouverture de session")
+        except Exception:
+            log_exception("désinstallation")
+        self.quit()
+
     def hotkey_combo(self) -> tuple[int, int]:
         return int(self.settings.get("hotkey_mods")), int(self.settings.get("hotkey_vk"))
 
     def hotkey_label(self) -> str:
-        from .win.hotkey import label
-        return label(*self.hotkey_combo())
+        return hotkeys().label(*self.hotkey_combo())
 
     def _apply_hotkey(self, restart: bool = False) -> None:
         """Register the shortcut as set (again if `restart`), or remove it."""
-        want = (bool(self.settings.get("hotkey")) and os.name == "nt"
+        want = (bool(self.settings.get("hotkey")) and hotkey_supported()
                 and not self._hotkey_paused
                 and not os.environ.get("CERCLIC_NO_INTEGRATION"))
         mods, vk = self.hotkey_combo()
@@ -398,7 +474,7 @@ class CerclicApp(QObject):
             self.hotkey = None
             self.hotkey_ok = None
         if want and self.hotkey is None:
-            from .win.hotkey import Hotkey
+            Hotkey = hotkeys().Hotkey
             self._hk_serial += 1
             serial = self._hk_serial
             # each answer carries its registration's number: a late answer
@@ -425,18 +501,18 @@ class CerclicApp(QObject):
             self._good_combo = combo
         elif trying is not None and trying != combo:
             # The combination just chosen is taken: keep the one that worked.
-            from .win.hotkey import label
+            label = hotkeys().label
             refused, kept = label(*combo), label(*trying)
             self.settings.set("hotkey_mods", trying[0])
             self.settings.set("hotkey_vk", trying[1])
             self.settings.save()
             if win is not None:
-                self._hotkey_note = (f"{refused} est déjà utilisé par Windows ou une "
+                self._hotkey_note = (f"{refused} est déjà utilisé par {OS_NAME} ou une "
                                      f"autre application. Ton raccourci reste {kept}.")
                 win.show_combo(*trying)
             else:
                 self.message(f"Raccourci {refused} indisponible",
-                             "Windows ou une autre application l'utilise déjà. "
+                             f"{OS_NAME} ou une autre application l'utilise déjà. "
                              f"Ton raccourci reste {kept}.", kind="warn")
             self._apply_hotkey(restart=True)
             return
@@ -447,13 +523,15 @@ class CerclicApp(QObject):
             fallback = (" ; le clic droit « Cerclic » marche toujours"
                         if self.settings.get("context_menu") else "")
             self.message(f"Raccourci {self.hotkey_label()} indisponible",
-                         "Windows ou une autre application l'utilise déjà. Choisis-en "
+                         f"{OS_NAME} ou une autre application l'utilise déjà. Choisis-en "
                          f"un autre dans Cerclic{fallback}.",
                          kind="warn", buttons=[("Plus tard", None),
-                                               ("Choisir", self.open_settings)])
+                                               ("Changer de raccourci", self._open_hotkey_page)])
 
     def right_click_how(self) -> str:
-        """How to reach the right-click entry on this Windows."""
+        """How to reach the right-click entry on this system."""
+        if IS_MAC:
+            return "clic droit, Actions rapides, puis « Cerclic »"
         if os.name == "nt":
             try:
                 from .win import shell
@@ -490,8 +568,16 @@ class CerclicApp(QObject):
 
         def read():
             try:
-                from .win.selection import foreground_selection
-                paths = foreground_selection()
+                if IS_MAC:
+                    from .mac.selection import NotAllowed, finder_selection
+                    try:
+                        paths = finder_selection()
+                    except NotAllowed:
+                        self.bridge.finder_refused.emit(n)
+                        return
+                else:
+                    from .win.selection import foreground_selection
+                    paths = foreground_selection()
             except Exception:
                 log_exception("lecture de la sélection")
                 paths = []
@@ -504,6 +590,30 @@ class CerclicApp(QObject):
             return
         self._reading_selection = 0
         self.open_wheel(paths, source="hotkey")
+
+    def _on_finder_refused(self, n: int) -> None:
+        if n != self._reading_selection:
+            return
+        self._reading_selection = 0
+        from .mac.integration import open_automation_settings
+        self.message("Autorise Cerclic à lire ta sélection",
+                     "Réglages Système, Confidentialité et sécurité, Automatisation : "
+                     "coche « Finder » sous Cerclic. Le clic droit, Actions rapides, "
+                     "« Cerclic » marche sans cela.", kind="warn",
+                     buttons=[("Plus tard", None),
+                              ("Ouvrir les réglages", open_automation_settings)],
+                     auto_ms=25000)
+
+    # -- files sent by macOS ---------------------------------------------------------------
+    def _file_opened(self, path: str) -> None:
+        self.files_received = True
+        self._opened.append(path)
+        self._opened_timer.start()          # one request for the whole bunch
+
+    def _open_received(self) -> None:
+        paths, self._opened = self._opened, []
+        if paths:
+            self.handle_request("open", paths)
 
     # -- wheel ---------------------------------------------------------------------------
     def open_wheel(self, paths: list, source: str = "menu") -> None:
@@ -525,7 +635,7 @@ class CerclicApp(QObject):
             else:
                 self.message("Sélectionne d'abord un fichier",
                              "Clique sur une image, un PDF, une vidéo ou un son dans "
-                             "l'Explorateur ou sur le Bureau, puis appuie sur "
+                             f"{FILES_APP} ou sur le Bureau, puis appuie sur "
                              f"{self.hotkey_label()}."
                              + (f" Ou : {self.right_click_how()}."
                                 if self.settings.get("context_menu") else ""))
@@ -543,10 +653,13 @@ class CerclicApp(QObject):
             return
         opts = {"quality": int(self.settings.get("compress_quality")),
                 "jpg_quality": int(self.settings.get("jpg_quality"))}
+        if self.settings.get("output_mode") == "folder" and self.settings.get("output_folder"):
+            opts["_out_dir"] = self.settings.get("output_folder")
         opts.update(choice_opts)
         log(f"action {action_id} sur {len(files)} fichier(s)")
         if action.ui == "clipboard":
             self._copy_image(files[0])
+            self.focus_back_later()
             return
         self._drive(self._flow(action, files, opts, pos))
 
@@ -565,7 +678,7 @@ class CerclicApp(QObject):
             return
         QApplication.clipboard().setImage(img)
         log("image copiée dans le presse-papiers")
-        self.message("Image copiée", "Colle-la où tu veux avec Ctrl + V.", kind="ok",
+        self.message("Image copiée", f"Colle-la où tu veux avec {MOD_KEY} + V.", kind="ok",
                      auto_ms=3500)
 
     def _drive(self, gen, value=None) -> None:
@@ -573,13 +686,36 @@ class CerclicApp(QObject):
         try:
             ask = gen.send(value)
         except StopIteration:
+            self.focus_back_later()
             return
         except Exception:
             log_exception("déroulé d'une action")
             self.message("Cerclic a rencontré un problème",
                          f"Les détails sont dans {log_path()}", kind="error")
+            self.focus_back_later()
             return
         ask(lambda result: self._drive(gen, result))
+
+    def focus_back_later(self) -> None:
+        """macOS: once the wheel and its popups are gone, the Finder (where the
+        files are) gets the keyboard back, as Windows does by itself."""
+        if IS_MAC:
+            QTimer.singleShot(250, self._focus_back)
+
+    def _focus_back(self) -> None:
+        if self.session is not None:
+            return
+        for w in list(self._live):
+            try:
+                if isinstance(w, QWidget) and w.isVisible():
+                    return                      # an editor or a question is open
+            except RuntimeError:
+                pass
+        win = self._settings_window()
+        if win is not None and win.isVisible():
+            return                              # the user is in Cerclic's window
+        from .mac.foreground import give_back_to_finder
+        give_back_to_finder()
 
     def _flow(self, action, files, opts, pos):
         from .actions import pdf as pdf_actions
@@ -745,7 +881,8 @@ class CerclicApp(QObject):
                 self._drive(self._retry_password(action, files, opts, pos, attempts,
                                                  result.error, result.password_path))
                 return
-            card.finish(result, note=_elsewhere_note(files, result.outputs))
+            card.finish(result, note=_elsewhere_note(files, result.outputs,
+                                                     opts.get("_out_dir")))
             if not state["shown"]:
                 state["shown"] = True
                 self.cards.add(card)
@@ -851,10 +988,17 @@ class CerclicApp(QObject):
         win.capturing.connect(self._pause_hotkey)
         win.draw_signature.connect(lambda: self._draw_signature(win))
         win.quit_requested.connect(self.quit)
+        win.uninstall_requested.connect(self.uninstall_mac)
         win.destroyed.connect(lambda *_: setattr(self, "_settings_win", None))
         self._settings_win = win
         win.set_hotkey_status(self.hotkey_ok if self.hotkey is not None else None)
         win.show_centered(QCursor.pos())
+
+    def _open_hotkey_page(self) -> None:
+        self.open_settings()
+        win = self._settings_window()
+        if win is not None:
+            win.show_page("hotkey")
 
     def _setting_changed(self, win, key: str) -> None:
         if key in ("context_menu", "autostart"):
@@ -963,7 +1107,7 @@ def run_resident(cmd: str, paths: list[str], lock) -> int:
         except OSError:
             pass
     qInstallMessageHandler(_qt_messages)
-    qapp = QApplication.instance() or QApplication(sys.argv[:1])
+    qapp = QApplication.instance() or FileOpenApp(sys.argv[:1])
     qapp.setQuitOnLastWindowClosed(False)
     qapp.setApplicationName(APP_NAME)
     qapp.setApplicationVersion(__version__)
@@ -982,13 +1126,17 @@ def run_resident(cmd: str, paths: list[str], lock) -> int:
 
     def first_request():
         first = not app.settings.get("welcome_shown")
-        if first:
-            app.settings.set("welcome_shown", True)
-            app.settings.save()
         if cmd == "open":
             app.open_wheel(paths, source="menu")
+        elif app.files_received:
+            pass                         # macOS started Cerclic to open files: the wheel
         elif cmd in ("hello", "settings") or first:
+            if first:
+                app.settings.set("welcome_shown", True)
+                app.settings.save()
             app.open_settings(welcome=first)
 
-    QTimer.singleShot(0, first_request)
+    # macOS hands the files it started Cerclic for a moment after the start:
+    # the settings only open if none came.
+    QTimer.singleShot(700 if IS_MAC and cmd == "hello" else 0, first_request)
     return qapp.exec()

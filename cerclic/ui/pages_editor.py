@@ -9,13 +9,14 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QTransform
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QTransform
 from PySide6.QtWidgets import (QAbstractItemView, QLabel, QListView, QListWidget,
                                QListWidgetItem, QPushButton, QStyle,
                                QStyledItemDelegate)
 
 from .editor_base import EditorWindow, Loader, qimage_from_rgb
-from .theme import ACCENT, BG, FONT_FAMILY, MUTED, TEXT
+from ..system import DELETE_KEY, MOD_KEY
+from .theme import ACCENT, BG, MUTED, TEXT, base_font
 
 THUMB_H = 118           # thumbnail height, logical px
 CELL = QSize(108, 150)  # one page in the grid, label included
@@ -36,7 +37,7 @@ class _PageDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.State_Selected)
         if selected:
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(76, 141, 255, 60))
+            p.setBrush(QColor(46, 124, 246, 38))
             p.drawRoundedRect(r, 10, 10)
         box = QRectF(r.left() + 6, r.top() + 6, r.width() - 12, r.height() - 34)
         img: QImage | None = index.data(ROLE_IMG)
@@ -47,17 +48,17 @@ class _PageDelegate(QStyledItemDelegate):
             s = min(box.width() / img.width(), box.height() / img.height())
             w, h = img.width() * s, img.height() * s
             target = QRectF(box.center().x() - w / 2, box.center().y() - h / 2, w, h)
-            p.fillRect(target.adjusted(-1, -1, 1, 1), QColor(0, 0, 0, 90))
+            p.fillRect(target.adjusted(-1, -1, 1, 1), QColor(20, 40, 90, 50))
             p.drawImage(target, img)
             if selected:
                 p.setPen(QPen(QColor(ACCENT), 2))
                 p.setBrush(Qt.NoBrush)
                 p.drawRect(target.adjusted(-2, -2, 2, 2))
         else:
-            p.setPen(QPen(QColor("#3A3F4E"), 1, Qt.DashLine))
+            p.setPen(QPen(QColor("#C5CEDC"), 1, Qt.DashLine))
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(box.adjusted(12, 6, -12, -6), 4, 4)
-        f = QFont(FONT_FAMILY)
+        f = base_font()
         f.setPixelSize(12)
         f.setBold(selected)
         p.setFont(f)
@@ -113,7 +114,7 @@ class PagesEditor(EditorWindow):
     """accepted({"pages_order": [(index, rotation)...], "pages_mode": "save" | "extract"})"""
 
     def __init__(self, path: str, password: str | None = None):
-        super().__init__(os.path.basename(path), "Glisse pour trier · Suppr pour enlever")
+        super().__init__(os.path.basename(path), f"Glisse pour trier · {DELETE_KEY} pour enlever")
         self.path, self.password = path, password
         self.grid = PageGrid()
         self.grid.move_requested = self.move_selection
@@ -121,17 +122,19 @@ class PagesEditor(EditorWindow):
         self.grid.model().rowsMoved.connect(lambda *_: self._sync())
         self.center.addWidget(self.grid)
 
-        self.rot_left = self.chip("↺ Gauche", checkable=False)
+        self.rot_left = self.chip("↺", checkable=False)
+        self.rot_left.setToolTip("Pivoter à gauche")
         self.rot_left.clicked.connect(lambda: self.rotate_selection(270))
-        self.rot_right = self.chip("↻ Droite", checkable=False)
+        self.rot_right = self.chip("↻", checkable=False)
+        self.rot_right.setToolTip(f"Pivoter à droite ({MOD_KEY} + R)")
         self.rot_right.clicked.connect(lambda: self.rotate_selection(90))
         self.remove_btn = self.chip("Supprimer", checkable=False)
         self.remove_btn.clicked.connect(self.remove_selection)
         self.left_btn = self.chip("‹", checkable=False)
-        self.left_btn.setToolTip("Vers le début (Ctrl + ←)")
+        self.left_btn.setToolTip(f"Vers le début ({MOD_KEY} + ←)")
         self.left_btn.clicked.connect(lambda: self.move_selection(-1))
         self.right_btn = self.chip("›", checkable=False)
-        self.right_btn.setToolTip("Vers la fin (Ctrl + →)")
+        self.right_btn.setToolTip(f"Vers la fin ({MOD_KEY} + →)")
         self.right_btn.clicked.connect(lambda: self.move_selection(1))
         for w in (self.rot_left, self.rot_right, self.remove_btn, self.left_btn,
                   self.right_btn):

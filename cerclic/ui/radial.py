@@ -29,7 +29,7 @@ from ..paths import kind_of
 from ..win.foreground import bring_to_front
 from .dismiss import DismissGuard
 from .icons import draw_icon
-from .theme import MUTED, TEXT, font, qcolor
+from .theme import MUTED, TEXT, font, qcolor, under_white_text
 
 RI = 64          # radius of the centre disc
 RO = 158         # outer radius of the ring
@@ -38,9 +38,11 @@ PAD = 34         # room around the ring (shadow, hover growth)
 MAX_SLICES = 8
 LABEL_W = 92     # label width before it wraps on two lines
 
-BASE_IN = QColor(38, 41, 52)
-BASE_OUT = QColor(27, 29, 37)
-CENTER = QColor(20, 22, 29)
+# frosted white glass (the light "Clair givré" style)
+BASE_IN = QColor(255, 255, 255, 236)
+BASE_OUT = QColor(244, 247, 253, 232)
+CENTER = QColor(255, 255, 255, 250)
+INK = QColor(27, 34, 50)
 
 
 @dataclass
@@ -104,6 +106,7 @@ class Wheel(QWidget):
                          | Qt.WindowStaysOnTopHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)   # macOS: stays shown in the background
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setWindowTitle("Cerclic")
@@ -340,15 +343,15 @@ class Wheel(QWidget):
         ri, ro = RI * g, RO * g
 
         # soft shadow
-        shadow = QRadialGradient(c, ro + PAD * 0.95)
-        shadow.setColorAt(0.0, QColor(0, 0, 0, 120))
-        shadow.setColorAt(ro / (ro + PAD * 0.95), QColor(0, 0, 0, 80))
-        shadow.setColorAt(1.0, QColor(0, 0, 0, 0))
+        shadow = QRadialGradient(QPointF(c.x(), c.y() + 6), ro + PAD * 0.95)
+        shadow.setColorAt(0.0, QColor(20, 40, 90, 70))
+        shadow.setColorAt(ro / (ro + PAD * 0.95), QColor(20, 40, 90, 46))
+        shadow.setColorAt(1.0, QColor(20, 40, 90, 0))
         p.setPen(Qt.NoPen)
         p.setBrush(shadow)
-        p.drawEllipse(c, ro + PAD * 0.95, ro + PAD * 0.95)
+        p.drawEllipse(QPointF(c.x(), c.y() + 6), ro + PAD * 0.95, ro + PAD * 0.95)
 
-        # the ring itself, like smoked glass
+        # the ring itself, like frosted glass
         ring = QPainterPath()
         ring.addEllipse(c, ro, ro)
         inner = QPainterPath()
@@ -359,12 +362,14 @@ class Wheel(QWidget):
         base.setColorAt(1.0, BASE_OUT)
         p.fillPath(ring, base)
         sheen = QLinearGradient(QPointF(c.x(), c.y() - ro), QPointF(c.x(), c.y() + ro))
-        sheen.setColorAt(0.0, QColor(255, 255, 255, 18))
+        sheen.setColorAt(0.0, QColor(255, 255, 255, 120))
         sheen.setColorAt(0.5, QColor(255, 255, 255, 0))
         p.fillPath(ring, sheen)
-        p.setPen(QPen(QColor(255, 255, 255, 26), 1))
         p.setBrush(Qt.NoBrush)
-        p.drawEllipse(c, ro - 0.5, ro - 0.5)
+        p.setPen(QPen(QColor(30, 50, 100, 40), 1))
+        p.drawEllipse(c, ro, ro)
+        p.setPen(QPen(QColor(255, 255, 255, 230), 1.4))
+        p.drawEllipse(c, ro - 1.2, ro - 1.2)
 
         n = len(self._slices)
         if n:
@@ -380,21 +385,22 @@ class Wheel(QWidget):
                 path = _donut_segment(c, ri + 3, outer, start, step - gap)
                 p.save()
                 p.setOpacity(p.opacity() * appear)
-                p.fillPath(path, QColor(255, 255, 255, 7))
+                p.fillPath(path, QColor(30, 50, 100, 7))
                 if h > 0.01:
+                    deep = under_white_text(s.color)       # the label reads on it
                     fill = QRadialGradient(c, outer)
-                    fill.setColorAt(ri / max(outer, 1), _alpha(s.color.darker(150), 210 * h))
-                    fill.setColorAt(1.0, _alpha(s.color, 240 * h))
+                    fill.setColorAt(ri / max(outer, 1), _alpha(deep.darker(106), 240 * h))
+                    fill.setColorAt(1.0, _alpha(deep, 250 * h))
                     p.fillPath(path, fill)
-                    p.setPen(QPen(_alpha(s.color.lighter(140), 200 * h), 1.2))
+                    p.setPen(QPen(_alpha(QColor(255, 255, 255), 200 * h), 1.2))
                     p.setBrush(Qt.NoBrush)
                     p.drawPath(path)
                 mid = math.radians(90 - i * step)
                 rm = (ri + outer) / 2 + 2
                 ix = c.x() + rm * math.cos(mid)
                 iy = c.y() - rm * math.sin(mid)
-                icon_col = _mix(s.color.lighter(135), QColor(255, 255, 255), h)
-                text_col = _mix(QColor(204, 208, 218), QColor(255, 255, 255), h)
+                icon_col = _mix(s.color.darker(106), QColor(255, 255, 255), h)
+                text_col = _mix(QColor(43, 51, 69), QColor(255, 255, 255), h)
                 lines = self._label_lines(s.label)
                 lift = 6 if len(lines) > 1 else 0
                 draw_icon(p, s.icon, ix, iy - 11 * g - lift, 25 * g, icon_col)
@@ -407,10 +413,13 @@ class Wheel(QWidget):
 
         # centre
         p.setPen(Qt.NoPen)
-        p.setBrush(CENTER)
+        cg = QRadialGradient(QPointF(c.x(), c.y() - ri * 0.4), ri * 1.4)
+        cg.setColorAt(0.0, CENTER)
+        cg.setColorAt(1.0, QColor(238, 243, 251, 250))
+        p.setBrush(cg)
         p.drawEllipse(c, ri, ri)
         self._paint_center(p, c, ri)
-        ring_col = QColor(255, 255, 255, 60 if self._center_hover else 26)
+        ring_col = QColor(46, 124, 246, 120) if self._center_hover else QColor(30, 50, 100, 38)
         p.setPen(QPen(ring_col, 1.2))
         p.setBrush(Qt.NoBrush)
         p.drawEllipse(c, ri, ri)
@@ -447,7 +456,7 @@ class Wheel(QWidget):
             p.setFont(font(9.6, bold=True))
             p.drawText(QRectF(c.x() - ri + 8, c.y() - 26, 2 * ri - 16, 20),
                        Qt.AlignCenter, hovered.label)
-            p.setPen(_mix(QColor(MUTED), hovered.color.lighter(150), 0.35))
+            p.setPen(_mix(QColor(MUTED), hovered.color.darker(120), 0.35))
             p.setFont(font(8.2))
             p.drawText(QRectF(c.x() - ri + 10, c.y() - 4, 2 * ri - 20, 32),
                        Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, hovered.desc)

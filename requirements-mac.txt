@@ -1,0 +1,15 @@
+# Cerclic for macOS: the same libraries as requirements.txt. Where the newest
+# version only exists for a recent macOS (pikepdf, OpenCV), a range lets the
+# build take the newest one this Mac can install (macOS 12 or later).
+PySide6-Essentials==6.8.3
+Pillow==12.3.0
+pi-heif==1.4.0
+pymupdf==1.28.2
+pikepdf>=8.15,<11
+pdf2docx==0.5.13
+opencv-python-headless>=4.10,<5
+numpy==2.1.3
+# building the app
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9
+imageio-ffmpeg==0.6.0     # only to take its ffmpeg (not shipped as a library)

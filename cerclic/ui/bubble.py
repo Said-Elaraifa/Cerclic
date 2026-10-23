@@ -1,18 +1,31 @@
 """A small bubble that asks for one value (password, text) where the wheel was.
 
 No system dialog opens: the bubble has the wheel's look, takes the keyboard at
-once, Enter validates; Escape or a click elsewhere cancels.
+once, Enter validates, Escape cancels. It stays while the user goes to fetch
+the value in another window (a password in a mail).
 """
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
                                QLineEdit, QPushButton, QVBoxLayout, QWidget)
 
 from ..win.foreground import bring_to_front
 from .dismiss import DismissGuard
-from .theme import BORDER, BUTTON_QSS, INPUT_QSS, MUTED, SURFACE, TEXT
+from .theme import BUTTON_QSS, INPUT_QSS, MUTED, TEXT, card_qss
+
+
+def _glyph_icon(name: str, size: int = 18) -> QIcon:
+    from .icons import draw_icon
+    pix = QPixmap(size * 2, size * 2)
+    pix.setDevicePixelRatio(2.0)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    draw_icon(p, name, size / 2, size / 2, size * 0.8, QColor(MUTED))
+    p.end()
+    return QIcon(pix)
 
 
 class PromptBubble(QWidget):
@@ -25,6 +38,7 @@ class PromptBubble(QWidget):
                          | Qt.WindowStaysOnTopHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)   # macOS: stays shown in the background
         self.setWindowTitle("Cerclic")
         self._allow_empty = allow_empty
         self._done = False
@@ -50,8 +64,14 @@ class PromptBubble(QWidget):
 
         self.edit = QLineEdit(default)
         self.edit.setMinimumWidth(270)
+        self.eye = None
         if password:
             self.edit.setEchoMode(QLineEdit.Password)
+            # show / hide the password, inside the field (the typing stays there)
+            self.eye = QAction(_glyph_icon("eye"), "Afficher le mot de passe", self.edit)
+            self.eye.setCheckable(True)
+            self.eye.toggled.connect(self._toggle_echo)
+            self.edit.addAction(self.eye, QLineEdit.TrailingPosition)
         self.edit.selectAll()
         self.edit.returnPressed.connect(self._accept)
         self.edit.textChanged.connect(self._sync)
@@ -59,13 +79,6 @@ class PromptBubble(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(8)
-        if password:
-            self.eye = QPushButton("Afficher")
-            self.eye.setObjectName("ghost")
-            self.eye.setCheckable(True)
-            self.eye.setFocusPolicy(Qt.NoFocus)      # the typing stays in the field
-            self.eye.toggled.connect(self._toggle_echo)
-            row.addWidget(self.eye)
         row.addStretch(1)
         cancel = QPushButton("Annuler")
         cancel.setObjectName("ghost")
@@ -80,21 +93,22 @@ class PromptBubble(QWidget):
         lay.addLayout(row)
 
         self.setStyleSheet(
-            f"#card{{background:{SURFACE};border:1px solid {BORDER};border-radius:16px;}}"
+            card_qss(16) +
             f"#head{{color:{TEXT};font-size:14px;font-weight:700;}}"
             f"#sub{{color:{MUTED};font-size:12px;}}" + INPUT_QSS + BUTTON_QSS)
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(36)
         shadow.setOffset(0, 10)
-        shadow.setColor(QColor(0, 0, 0, 170))
+        shadow.setColor(QColor(20, 40, 90, 64))
         card.setGraphicsEffect(shadow)
         self._sync()
         self.adjustSize()
-        self._guard = DismissGuard(self, self.cancel, leave_s=8.0, idle_s=180)
+        self._guard = DismissGuard(self, self.cancel, idle_s=180, sticky=True)
 
     def _toggle_echo(self, on: bool) -> None:
         self.edit.setEchoMode(QLineEdit.Normal if on else QLineEdit.Password)
-        self.eye.setText("Masquer" if on else "Afficher")
+        self.eye.setIcon(_glyph_icon("eye_off" if on else "eye"))
+        self.eye.setText("Masquer le mot de passe" if on else "Afficher le mot de passe")
 
     def _sync(self) -> None:
         self.ok.setEnabled(self._allow_empty or bool(self.edit.text().strip()))

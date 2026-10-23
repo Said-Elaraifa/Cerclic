@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QFileDialog, QLabel, QPushButton, QWidget
 
 from ..settings import config_dir
 from .editor_base import EditorWindow, Loader, fit_view
+from ..system import ENTER_KEY
 from .theme import MUTED, font
 
 INK = QColor(16, 32, 74)
@@ -149,7 +150,7 @@ class _Pad(QWidget):
         if not self.strokes:
             p.setPen(QColor(150, 152, 160))
             p.setFont(font(12))
-            p.drawText(a, Qt.AlignCenter, "Signe ici avec la souris")
+            p.drawText(a, Qt.AlignCenter, "Signe ici")
         pen = QPen(INK, PEN_W)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
@@ -202,7 +203,7 @@ class SignaturePad(EditorWindow):
         imp.setFocusPolicy(Qt.NoFocus)
         imp.clicked.connect(self._import)
         clear = QPushButton("Effacer")
-        clear.setObjectName("ghost")
+        clear.setObjectName("danger")
         clear.setFocusPolicy(Qt.NoFocus)
         clear.clicked.connect(self.pad.clear)
         self.msg = QLabel("")
@@ -382,16 +383,16 @@ class _PlaceCanvas(QWidget):
             p.drawText(self.rect(), Qt.AlignCenter, self.message)
             return
         v = self._view()
-        p.fillRect(v.adjusted(-1, -1, 1, 1), QColor(0, 0, 0, 90))
+        p.fillRect(v.adjusted(-1, -1, 1, 1), QColor(20, 40, 90, 46))
         p.drawImage(v, self.page_img)
         r = self.box_view()
         if self.sig_img is not None:
             p.drawImage(r, self.sig_img)
-        p.setPen(QPen(QColor(76, 141, 255), 1.5, Qt.DashLine))
+        p.setPen(QPen(QColor(46, 124, 246), 1.5, Qt.DashLine))
         p.setBrush(Qt.NoBrush)
         p.drawRect(r)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(76, 141, 255))
+        p.setBrush(QColor(46, 124, 246))
         for pt in (r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft()):
             p.drawEllipse(pt, 5.5, 5.5)
 
@@ -401,7 +402,7 @@ class SignPlacer(EditorWindow):
 
     def __init__(self, pdf_path: str, signature: str, password: str | None = None):
         super().__init__(os.path.basename(pdf_path),
-                         "Glisse la signature · tire un coin · Entrée pour signer")
+                         f"Glisse la signature · tire un coin · {ENTER_KEY} pour signer")
         self.path, self.signature, self.password = pdf_path, signature, password
         self.canvas = _PlaceCanvas()
         self.canvas.double_clicked.connect(self.validate)

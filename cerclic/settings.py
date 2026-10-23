@@ -7,26 +7,33 @@ import sys
 
 APP_DIR_NAME = "Cerclic"
 PORTABLE_DATA = "Données Cerclic"     # beside Cerclic.exe in the portable version
+_MAC = sys.platform == "darwin"
 
 DEFAULTS: dict = {
     "signature": "",            # path to the signature PNG (drawn or imported)
-    "autostart": True,          # launch with Windows
-    "context_menu": True,       # "Cerclic" entry in the right-click menu
+    "autostart": True,          # launch with Windows (macOS: at login)
+    "context_menu": True,       # "Cerclic" in the right-click menu (macOS: Quick Action)
     "hotkey": True,             # the keyboard shortcut opens the wheel on the selection
-    "hotkey_mods": 0x3,         # its modifiers (Windows MOD_* flags): Ctrl + Alt
-    "hotkey_vk": 0x20,          # its key (Windows virtual-key code): Space
+    # Its combination. Windows: MOD_* flags and virtual-key code, Ctrl + Alt + Espace.
+    # macOS: Carbon flags and key code + 0x100, Maj + Cmd + Espace (mac/hotkey.py).
+    "hotkey_mods": 0x300 if _MAC else 0x3,
+    "hotkey_vk": 0x131 if _MAC else 0x20,
     "classic_menu": False,      # Windows 11: show the full right-click menu at once
     "classic_menu_by_cerclic": False,  # we set it, so we may undo it on uninstall
     "jpg_quality": 90,
     "compress_quality": 70,
+    "output_mode": "beside",    # results: "beside" the original, or in "folder"
+    "output_folder": "",        # that folder
     "welcome_shown": False,
 }
 # Keys from older versions (gesture, hold_ms...) are dropped on load.
 
 
 def is_portable() -> bool:
-    """The portable version (unzipped anywhere): no uninstaller beside it."""
-    if not getattr(sys, "frozen", False):
+    """The portable version of Windows (unzipped anywhere): no uninstaller beside
+    it. Never on macOS: nothing is written into Cerclic.app (that would break
+    its signature)."""
+    if not getattr(sys, "frozen", False) or _MAC:
         return False
     return not os.path.exists(os.path.join(os.path.dirname(sys.executable),
                                            "unins000.exe"))
@@ -56,6 +63,8 @@ def _portable_data() -> str | None:
 def config_dir() -> str:
     if os.name == "nt":
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif _MAC:
+        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
     else:
         base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     name = APP_DIR_NAME

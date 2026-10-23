@@ -448,7 +448,7 @@ def test_request_opens_wheel_and_runs_action(qtbot, cerclic_app, jpg_photo):
     _click_slice(qtbot, s.wheel, "Compresser")
     assert cerclic_app.session is None
     folder = os.path.dirname(jpg_photo)
-    qtbot.waitUntil(lambda: any("compressed" in f for f in os.listdir(folder)), timeout=8000)
+    qtbot.waitUntil(lambda: any("(compressé)" in f for f in os.listdir(folder)), timeout=8000)
     qtbot.waitUntil(lambda: any(getattr(c, "_outputs", None) for c in cerclic_app.cards._cards),
                     timeout=8000)
 
@@ -481,7 +481,7 @@ def test_password_flow(qtbot, cerclic_app, pdf_locked):
     qtbot.waitUntil(lambda: any(getattr(c, "_outputs", None) or "échoué" in
                                 c._head.text() for c in cerclic_app.cards._cards
                                 if hasattr(c, "_head")), timeout=8000)
-    assert any("locked (compressed)" in f for f in os.listdir(folder)) or \
+    assert any("locked (compressé)" in f for f in os.listdir(folder)) or \
         any("déjà" in c._status.text() for c in cerclic_app.cards._cards if hasattr(c, "_status"))
 
 
@@ -774,7 +774,7 @@ def test_pages_flow_end_to_end(qtbot, cerclic_app, pdf_3p):
     ed.remove_selection()
     ed.validate()
     folder = os.path.dirname(pdf_3p)
-    qtbot.waitUntil(lambda: any("organized" in f for f in os.listdir(folder)), timeout=8000)
+    qtbot.waitUntil(lambda: any("(réorganisé)" in f for f in os.listdir(folder)), timeout=8000)
 
 
 def test_used_editor_survives_a_click_elsewhere(qtbot, monkeypatch):

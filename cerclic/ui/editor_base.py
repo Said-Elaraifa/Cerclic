@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
 
 from ..win.foreground import bring_to_front
 from .dismiss import DismissGuard
-from .theme import BORDER, BUTTON_QSS, MUTED, SCROLL_QSS, SURFACE, SURFACE_2, TEXT
+from .theme import (ACCENT_STRONG, BUTTON_QSS, MUTED, SCROLL_QSS, SURFACE_2, TEXT,
+                    card_qss)
 
 SHADOW = 18          # transparent margin around the card, for its shadow
 EDGE = 10            # minimum gap between the card and the screen edges
@@ -156,6 +157,7 @@ class EditorWindow(QWidget):
                          | Qt.WindowStaysOnTopHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)   # macOS: stays shown in the background
         self.setWindowTitle(f"Cerclic · {title}")
         self.setFocusPolicy(Qt.StrongFocus)
         self._done = False
@@ -202,7 +204,7 @@ class EditorWindow(QWidget):
         root.addLayout(self.bar)
 
         self.setStyleSheet(
-            f"#card{{background:{SURFACE};border:1px solid {BORDER};border-radius:16px;}}"
+            card_qss(16) +
             f"QLabel{{color:{TEXT};}}"
             f"#title{{font-size:12px;font-weight:700;}}"
             f"#hint{{color:{MUTED};font-size:11px;}}"
@@ -212,15 +214,15 @@ class EditorWindow(QWidget):
             f"QPushButton#chip{{background:{SURFACE_2};color:{MUTED};padding:4px 9px;"
             "border-radius:11px;font-size:11px;font-weight:600;}"
             f"QPushButton#chip:hover{{color:{TEXT};}}"
-            "QPushButton#chip:checked{background:#4C8DFF;color:white;}"
-            f"QPushButton#close{{background:transparent;color:{MUTED};padding:0;"
+            f"QPushButton#chip:checked{{background:{ACCENT_STRONG};color:white;}}"
+            f"QPushButton#close{{background:transparent;color:{MUTED};padding:0;border:none;"
             "font-size:13px;border-radius:8px;}"
             f"QPushButton#close:hover{{background:{SURFACE_2};color:{TEXT};}}"
             + SCROLL_QSS)
         shadow = QGraphicsDropShadowEffect(self.card)
         shadow.setBlurRadius(34)
         shadow.setOffset(0, 8)
-        shadow.setColor(QColor(0, 0, 0, 160))
+        shadow.setColor(QColor(20, 40, 90, 64))
         self.card.setGraphicsEffect(shadow)
 
         self._guard = DismissGuard(self, self.cancel, leave_s=45.0, idle_s=900.0,

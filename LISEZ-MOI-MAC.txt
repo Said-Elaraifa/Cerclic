@@ -1,0 +1,68 @@
+CERCLIC SUR MAC : INSTALLATION
+==============================
+
+Il faut un Mac avec macOS 12 (Monterey) ou plus récent, puce Apple ou Intel,
+et Internet. Compte 10 à 25 minutes la première fois, presque tout en attente.
+
+1. Décompresse ce dossier (double-clic sur le .zip). Il arrive en général dans
+   Téléchargements, sous le nom Cerclic-0.4.0-mac.
+
+2. Ouvre Terminal : Cmd + Espace, tape « Terminal », Entrée.
+
+3. Colle cette ligne, puis Entrée :
+
+      bash ~/Downloads/Cerclic-0.4.0-mac/scripts/build_mac.sh
+
+   (Si le dossier est ailleurs : tape « bash  » avec un espace, glisse le
+   fichier scripts/build_mac.sh dans la fenêtre de Terminal, puis Entrée.)
+
+4. La première fois, macOS propose d'installer ses « outils de développement » :
+   clique sur « Installer », accepte, patiente. La construction reprend toute
+   seule ensuite. Le reste se fait sans toi : téléchargement de Python et des
+   bibliothèques, construction de Cerclic.app, vérification, copie dans
+   Applications, ouverture.
+
+5. C'est prêt quand Terminal affiche « Terminé » : l'icône de Cerclic est dans
+   la barre des menus, en haut de l'écran, et sa fenêtre s'ouvre.
+
+UTILISER CERCLIC
+----------------
+
+- Clic droit sur une image, un PDF, une vidéo ou un son dans le Finder :
+  Actions rapides, puis « Cerclic ». S'il n'y est pas : Actions rapides,
+  Personnaliser…, coche « Cerclic ». Il est aussi dans « Ouvrir avec ».
+- Ou sélectionne des fichiers dans le Finder et appuie sur Maj + Cmd + Espace
+  (modifiable dans Cerclic, section Raccourci clavier). La première fois, macOS
+  demande si Cerclic peut contrôler le Finder : accepte (Cerclic y lit
+  seulement les fichiers sélectionnés).
+- Ou glisse des fichiers sur l'icône de Cerclic.
+
+SI QUELQUE CHOSE NE VA PAS
+--------------------------
+
+Envoie-moi les dernières lignes affichées par Terminal. Cerclic écrit aussi un
+journal et un rapport de vérification dans :
+   ~/Library/Application Support/Cerclic/  (cerclic.log et selftest.txt)
+Dans le Finder : menu Aller, « Aller au dossier… », colle ce chemin.
+
+PARTAGER CERCLIC AVEC D'AUTRES MAC
+---------------------------------
+
+Le script fabrique aussi dist/Cerclic-0.4.0-mac-arm64.dmg (ou -x86_64 sur
+un Mac Intel). Cerclic n'étant pas signé par Apple, sur un autre Mac il faudra,
+après un premier essai d'ouverture : Réglages Système, Confidentialité et
+sécurité, « Ouvrir quand même ». Pour supprimer cette étape : un compte Apple
+Developer (99 dollars par an) permet de signer et de faire certifier Cerclic.
+
+FAIRE DE LA PLACE
+-----------------
+
+Le dossier caché .outils (Python et bibliothèques, environ 1,5 Go) ne sert qu'à
+construire. Une fois Cerclic installé, tu peux supprimer tout le dossier
+Cerclic-0.4.0-mac : Cerclic.app, dans Applications, est complet.
+
+DÉSINSTALLER
+------------
+
+Cerclic, section À propos, « Désinstaller… », puis mets Cerclic.app (dans
+Applications) à la corbeille.

@@ -770,7 +770,7 @@ def test_anonymise_png_and_webp(tmp_path):
 
 def test_mirror(jpg_photo):
     out = _ok(engine.run("img_rotate", [jpg_photo], {"mirror": True}))[0]
-    assert "mirrored" in out
+    assert "(miroir)" in out
     with Image.open(jpg_photo) as a, Image.open(out) as b:
         assert a.size == b.size
 
@@ -806,14 +806,14 @@ def test_clipboard_image_is_upright(jpg_rotated_exif):
 def test_arrange_pdf_order_rotation_removal(pdf_3p):
     out = _ok(engine.run("pdf_pages", [pdf_3p],
                          {"pages_order": [(2, 0), (0, 90)], "pages_mode": "save"}))[0]
-    assert "organized" in out
+    assert "(réorganisé)" in out
     with pymupdf.open(out) as d:
         assert d.page_count == 2
         assert "Page 3" in d[0].get_text() and "Page 1" in d[1].get_text()
         assert d[1].rotation == 90
     ext = _ok(engine.run("pdf_pages", [pdf_3p],
                          {"pages_order": [(1, 0)], "pages_mode": "extract"}))[0]
-    assert "extract" in ext
+    assert "(extrait)" in ext
     with pymupdf.open(ext) as d:
         assert d.page_count == 1 and "Page 2" in d[0].get_text()
     same = engine.run("pdf_pages", [pdf_3p], {"pages_order": [0, 1, 2]})

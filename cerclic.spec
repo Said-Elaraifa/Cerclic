@@ -13,8 +13,8 @@ hiddenimports = [
     "win32com.shell", "win32com.shell.shell", "win32gui",
 ]
 
-# libheif (HEIC photos) and anything pillow_heif ships.
-for pkg in ("pillow_heif",):
+# libheif (HEIC photos, decoder only) and anything pi_heif ships.
+for pkg in ("pi_heif",):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
@@ -36,6 +36,7 @@ a = Analysis(
     hookspath=[],
     runtime_hooks=[],
     excludes=["PyQt5", "PyQt6", "PySide2", "tkinter", "matplotlib", "pandas",
+              "pillow_heif",                    # tests only (its wheels contain x265, GPL)
               "scipy", "IPython", "pytest", "pytestqt", "PySide6.QtWebEngineCore",
               "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtPdf", "PySide6.QtSql",
               "PySide6.QtTest", "PySide6.QtOpenGL", "PySide6.QtDBus",

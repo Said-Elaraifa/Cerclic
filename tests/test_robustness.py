@@ -375,6 +375,9 @@ def test_portable_keeps_its_settings_beside_it(tmp_path, monkeypatch):
     assert st.config_dir() == str(tmp_path / "Cerclic" / st.PORTABLE_DATA)
     (exe.parent / "unins000.exe").write_bytes(b"")          # installed: %APPDATA%
     assert not st.is_portable() and st.PORTABLE_DATA not in st.config_dir()
+    (exe.parent / "unins000.exe").unlink()
+    monkeypatch.setattr(st, "_MAC", True)                    # Cerclic.app: never written in
+    assert not st.is_portable()
 
 
 def test_password_retry_uses_the_new_password(tmp_path, pdf_3p):
