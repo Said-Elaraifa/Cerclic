@@ -146,3 +146,10 @@ workflow GitHub pour Windows ; `scripts/build_mac.sh` sur un Mac (ou le job
 macOS du workflow). Paquet Microsoft Store : `scripts/build_store.sh` après le
 build Windows (publication : `store/publication/GUIDE.txt`). Licences des composants : `assets/LICENCES.txt`. Détails
 dans `docs/ARCHITECTURE.md`.
+
+Publier une version : change `__version__` dans `cerclic/__init__.py`, pousse,
+puis sur GitHub : Actions, « Build Cerclic », « Run workflow », coche
+« publier ». Le workflow fabrique Windows et Mac et crée la Release
+`v<version>` (pousser une étiquette `v*` fait la même chose). Liens qui donnent
+toujours la dernière version :
+`releases/latest/download/Cerclic-Windows.exe` et `.../Cerclic-Mac.dmg`.
