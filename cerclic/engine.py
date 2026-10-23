@@ -33,6 +33,8 @@ class Result:
     cancelled: bool = False
     needs_password: bool = False
     info: bool = False          # nothing went wrong, there was just nothing to do
+    password_path: str = ""     # with needs_password: the file it was about
+    notes: list[str] = field(default_factory=list)  # files a batch had to leave out
 
     @property
     def count(self) -> int:
@@ -45,6 +47,11 @@ class Context:
     def __init__(self, on_progress=None, cancel: threading.Event | None = None):
         self._on_progress = on_progress
         self._cancel = cancel or threading.Event()
+        self.notes: list[str] = []      # why some files of a batch were left out
+
+    def note(self, text: str) -> None:
+        if text and text not in self.notes:
+            self.notes.append(text)
 
     @property
     def cancelled(self) -> bool:
@@ -123,7 +130,8 @@ def run(action_id: str, paths: list[str], opts: dict | None = None,
                                 f"{action.min_files} fichiers.")
             outputs = [o for o in action.handler(paths, opts, ctx) if o]
             ctx.check()
-            return Result(action_id, True, outputs, "", time.perf_counter() - t0)
+            return Result(action_id, True, outputs, "", time.perf_counter() - t0,
+                          notes=list(ctx.notes))
         except Cancelled:
             _cleanup(reserved)
             return Result(action_id, False, [], "Annulé", time.perf_counter() - t0,
@@ -131,7 +139,7 @@ def run(action_id: str, paths: list[str], opts: dict | None = None,
         except NeedsPassword as exc:
             _cleanup(reserved)
             return Result(action_id, False, [], str(exc), time.perf_counter() - t0,
-                          needs_password=True)
+                          needs_password=True, password_path=getattr(exc, "path", ""))
         except NothingToDo as exc:
             _cleanup(reserved)
             return Result(action_id, False, [], str(exc), time.perf_counter() - t0,

@@ -20,3 +20,9 @@ class NeedsPassword(UserError):
 
 class NothingToDo(UserError):
     """The action would not change anything (already small, not protected...)."""
+
+
+class LeftOut(NothingToDo):
+    """This file cannot get this action (a multi-page TIFF for an image edit):
+    alone it is said on the card; in a batch, the others still get done and
+    the card says which one was left out."""

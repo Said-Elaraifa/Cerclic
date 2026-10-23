@@ -306,7 +306,8 @@ class TrimEditor(EditorWindow):
         self.track.setFocus()
         from ..actions import video as _video
         path = self.path
-        self._info.run(lambda: _video.probe(path))
+        stop = self._info.stop_event.is_set       # closing the popup stops it
+        self._info.run(lambda: _video.probe(path, should_stop=stop))
 
     def _probed(self, info, err) -> None:
         if err or info is None or info.duration <= 0:

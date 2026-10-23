@@ -207,8 +207,18 @@ class ShortcutEdit(QWidget):
         self.capturing.emit(False)
 
     def _default(self) -> None:
-        self.stop_recording()
+        # Same order as a recorded combination: saved first, then the pause ends.
+        was_recording = self.recording
+        if was_recording:
+            self.recording = False
+            self.releaseKeyboard()
+            self.change_btn.setText("Modifier")
+        self.mods, self.vk = hk.DEFAULT_MODS, hk.DEFAULT_VK
+        self._show_combo()
+        self.set_status("Vérification…", "muted")
         self.chosen.emit(hk.DEFAULT_MODS, hk.DEFAULT_VK)
+        if was_recording:
+            self.capturing.emit(False)
 
     def keyPressEvent(self, e):
         if not self.recording:
@@ -551,8 +561,9 @@ class SettingsWindow(QWidget):
                                   "fois que tu signes.")
 
     def _import_signature(self) -> None:
+        from .signature import pictures_folder
         src, _ = QFileDialog.getOpenFileName(
-            self, "Choisir une photo de ta signature", "",
+            self, "Choisir une photo de ta signature", pictures_folder(),
             "Images (*.png *.jpg *.jpeg *.webp *.heic *.bmp)")
         if not src:
             return

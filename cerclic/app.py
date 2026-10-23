@@ -40,14 +40,6 @@ def _gc_now() -> None:
         gc.collect()
 
 
-def _portable() -> bool:
-    """Run from the portable zip (no uninstaller beside it)?"""
-    if not getattr(sys, "frozen", False):
-        return False
-    return not os.path.exists(os.path.join(os.path.dirname(sys.executable),
-                                           "unins000.exe"))
-
-
 def _summary(paths: list[str]) -> str:
     if len(paths) == 1:
         name = os.path.basename(paths[0])
@@ -165,7 +157,7 @@ class _QuitWindow(QWidget):
 class Bridge(QObject):
     """Signals emitted from other threads, delivered on the GUI thread."""
     hotkey = Signal()
-    hotkey_status = Signal(bool)
+    hotkey_status = Signal(int, bool)     # (registration number, ok)
     selection = Signal(int, list)
 
 
@@ -289,12 +281,14 @@ class CerclicApp(QObject):
         super().__init__()
         from .ui.cards import CardStack
         self.qapp = qapp
-        from .settings import config_path
+        from .settings import config_path, is_portable
+        self.portable = is_portable()
         first_run = not os.path.exists(config_path())
         self.settings = Settings.load()
-        if first_run and _portable():
+        if first_run and self.portable:
             # The portable version adds nothing to Windows unless asked to
-            # (its folder may be deleted at any time).
+            # (its folder may be deleted at any time). Its settings live
+            # beside it, apart from an installed Cerclic's.
             self.settings.set("context_menu", False)
             self.settings.set("autostart", False)
             self.settings.save()
@@ -309,6 +303,7 @@ class CerclicApp(QObject):
         self.hotkey = None
         self.hotkey_ok = None
         self._hotkey_paused = False
+        self._hk_serial = 0             # number of the latest registration
         self._good_combo = None         # the last combination Windows accepted
         self._trying = None             # set while a newly chosen one is tried
         self._hotkey_note = ""
@@ -365,17 +360,22 @@ class CerclicApp(QObject):
             return
         if os.name == "nt":
             from .win import shell
+            # (The portable version only ever removes what points to itself:
+            # an installed Cerclic keeps its entries.)
             try:
                 if self.settings.get("context_menu"):
                     if not shell.context_menu_ok():
                         shell.install_context_menu()
                         log("entrée « Cerclic » ajoutée au clic droit")
-                else:
+                elif not self.portable or shell.context_menu_mine():
                     shell.remove_context_menu()
             except Exception:
                 log_exception("clic droit : échec de l'installation")
             try:
-                shell.set_autostart(bool(self.settings.get("autostart")))
+                if self.settings.get("autostart"):
+                    shell.set_autostart(True)
+                elif not self.portable or shell.is_autostart():
+                    shell.set_autostart(False)
             except Exception:
                 log_exception("démarrage avec Windows : échec")
 
@@ -399,8 +399,12 @@ class CerclicApp(QObject):
             self.hotkey_ok = None
         if want and self.hotkey is None:
             from .win.hotkey import Hotkey
+            self._hk_serial += 1
+            serial = self._hk_serial
+            # each answer carries its registration's number: a late answer
+            # about a replaced combination is ignored
             self.hotkey = Hotkey(on_hotkey=self.bridge.hotkey.emit,
-                                 on_status=self.bridge.hotkey_status.emit,
+                                 on_status=lambda ok: self.bridge.hotkey_status.emit(serial, ok),
                                  mods=mods, vk=vk)
             self.hotkey.start()
 
@@ -410,8 +414,8 @@ class CerclicApp(QObject):
         self._hotkey_paused = paused
         self._apply_hotkey()
 
-    def _on_hotkey_status(self, ok: bool) -> None:
-        if self.hotkey is None:
+    def _on_hotkey_status(self, serial: int, ok: bool) -> None:
+        if self.hotkey is None or serial != self._hk_serial:
             return                      # an older registration, already replaced
         self.hotkey_ok = ok
         combo = (self.hotkey.mods, self.hotkey.vk)
@@ -522,7 +526,9 @@ class CerclicApp(QObject):
                 self.message("Sélectionne d'abord un fichier",
                              "Clique sur une image, un PDF, une vidéo ou un son dans "
                              "l'Explorateur ou sur le Bureau, puis appuie sur "
-                             f"{self.hotkey_label()}. Ou : {self.right_click_how()}.")
+                             f"{self.hotkey_label()}."
+                             + (f" Ou : {self.right_click_how()}."
+                                if self.settings.get("context_menu") else ""))
             return
         if self.session is not None:
             self.session.close()
@@ -607,6 +613,15 @@ class CerclicApp(QObject):
                 opts["passwords"] = passwords
         first_pw = registry._pw(opts, files[0])
         for need in action.needs:
+            if need == "crop" and kind_of(files[0]) == "image":
+                from .actions.images import page_count
+                pages = page_count(files[0])
+                if pages > 1:                  # a scan: say so before any drawing
+                    self.message(f"« {os.path.basename(files[0])} » a {pages} pages",
+                                 "Rogner n'en garderait que la première. Utilise "
+                                 "« En PDF » pour les garder toutes, puis Rogner sur "
+                                 "le PDF.")
+                    return
             if need == "crop":
                 from .ui.crop_editor import CropEditor
                 res = yield self._ask_editor(
@@ -728,7 +743,7 @@ class CerclicApp(QObject):
                 else:
                     card.deleteLater()
                 self._drive(self._retry_password(action, files, opts, pos, attempts,
-                                                 result.error))
+                                                 result.error, result.password_path))
                 return
             card.finish(result, note=_elsewhere_note(files, result.outputs))
             if not state["shown"]:
@@ -744,13 +759,19 @@ class CerclicApp(QObject):
         job.start()
         QTimer.singleShot(250, show_card)
 
-    def _retry_password(self, action, files, opts, pos, attempts, error):
+    def _retry_password(self, action, files, opts, pos, attempts, error, path=""):
         pw = yield self._ask_text("Mot de passe du PDF", error, pos, password=True,
                                   ok_label="Réessayer")
         if pw is None:
             return
         opts = dict(opts)
-        opts["password"] = pw
+        if path:                               # that file's password, the others kept
+            passwords = dict(opts.get("passwords") or {})
+            passwords[path] = pw
+            opts["passwords"] = passwords
+        else:
+            opts.pop("passwords", None)
+            opts["password"] = pw
         self._run_job(action, files, opts, pos, attempts + 1)
 
     # -- messages, help, settings ------------------------------------------------------------------

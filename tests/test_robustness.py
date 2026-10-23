@@ -42,12 +42,16 @@ def test_multipage_tiff_to_pdf_keeps_every_page(fax_tiff):
         assert doc.page_count == 3
 
 
-def test_multipage_tiff_edit_says_so_instead_of_dropping_pages(fax_tiff):
+def test_multipage_tiff_edit_says_so_instead_of_dropping_pages(fax_tiff, jpg_photo):
     for action, opts in (("img_rotate", {"degrees": 90}), ("img_compress", {}),
                          ("img_convert", {"fmt": "png"})):
         res = engine.run(action, [fax_tiff], opts)
         assert not res.ok and "3 pages" in res.error and "En PDF" in res.error, action
         assert not res.outputs
+    # in a batch, the other pictures are still done and the card says why one is not
+    res = engine.run("img_rotate", [jpg_photo, fax_tiff], {"degrees": 90})
+    assert res.ok and len(res.outputs) == 1
+    assert res.notes and "3 pages" in res.notes[0]
 
 
 def test_16_bit_grey_png_is_not_turned_white(tmp_path):
@@ -312,19 +316,23 @@ def test_new_shortcut_taken_keeps_the_old_one(qtbot):
     a = _app()
     try:
         a.hotkey = FakeHotkey(hk.DEFAULT_MODS, hk.DEFAULT_VK)
-        a._on_hotkey_status(True)                       # the default works
+        a._on_hotkey_status(a._hk_serial, True)        # the default works
         assert a._good_combo == (hk.DEFAULT_MODS, hk.DEFAULT_VK)
         new = (hk.MOD_CONTROL | hk.MOD_SHIFT, 0x58)
         a.settings.set("hotkey_mods", new[0])
         a.settings.set("hotkey_vk", new[1])
         a._trying = a._good_combo                       # what choosing it does
         a.hotkey = FakeHotkey(*new)
-        a._on_hotkey_status(False)                      # Ctrl + Maj + X is taken
+        a._on_hotkey_status(a._hk_serial, False)       # Ctrl + Maj + X is taken
         assert (a.settings.get("hotkey_mods"), a.settings.get("hotkey_vk")) == \
             (hk.DEFAULT_MODS, hk.DEFAULT_VK)
         texts = [lbl.text() for c in a.cards._cards for lbl in c.findChildren(QLabel)]
         assert any("Ctrl + Maj + X" in t for t in texts)
         assert any("reste Ctrl + Alt + Espace" in t for t in texts)
+        # a late answer about a replaced registration changes nothing
+        a._good_combo = (1, 2)
+        a._on_hotkey_status(a._hk_serial - 1, True)
+        assert a._good_combo == (1, 2)
     finally:
         _close(a)
 
@@ -337,3 +345,42 @@ def test_recycle_bin_items_are_ignored(tmp_path):
     real = tmp_path / "photo.jpg"
     real.write_bytes(b"x")
     assert clean_selection([str(binned), str(real)]) == [str(real)]
+
+
+def test_delete_that_fails_says_so(qtbot, tmp_path, monkeypatch):
+    from cerclic.engine import Result
+    from cerclic.ui import cards
+    out = tmp_path / "x (compressed).pdf"
+    out.write_bytes(b"x")
+    card = cards.JobCard("Compression")
+    card.finish(Result(action_id="pdf_compress", ok=True, outputs=[str(out)]))
+
+    def locked(path):
+        raise PermissionError(32, "used by another process")
+    monkeypatch.setattr(cards.os, "remove", locked)
+    card._undo()
+    assert out.exists() and "impossible" in card._head.text()
+    card.close()
+
+
+def test_portable_keeps_its_settings_beside_it(tmp_path, monkeypatch):
+    from cerclic import settings as st
+    exe = tmp_path / "Cerclic" / "Cerclic.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe))
+    monkeypatch.setattr(st, "_portable_dir", None)
+    assert st.is_portable()
+    assert st.config_dir() == str(tmp_path / "Cerclic" / st.PORTABLE_DATA)
+    (exe.parent / "unins000.exe").write_bytes(b"")          # installed: %APPDATA%
+    assert not st.is_portable() and st.PORTABLE_DATA not in st.config_dir()
+
+
+def test_password_retry_uses_the_new_password(tmp_path, pdf_3p):
+    import pikepdf
+    src = tmp_path / "ancien.pdf"
+    with pikepdf.open(pdf_3p) as p:          # AES-128: an accented password
+        p.save(str(src), encryption=pikepdf.Encryption(owner="café", user="café", R=4))
+    res = engine.run("pdf_unlock", [str(src)], {"passwords": {str(src): "café"}})
+    assert res.ok, res.error

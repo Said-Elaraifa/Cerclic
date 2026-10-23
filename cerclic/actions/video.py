@@ -54,8 +54,24 @@ _DUR = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 _VID = re.compile(r"Stream #\d+:\d+.*?: Video: .*?(\d{2,5})x(\d{2,5})")
 
 
-def probe(src: str) -> Probe:
-    """Read duration and streams from ffmpeg's banner (no ffprobe needed)."""
+def _tie(proc) -> None:
+    """The process stops with Cerclic (a job object on Windows)."""
+    if os.name == "nt":
+        try:
+            from ..win.jobobject import kill_with_cerclic
+            kill_with_cerclic(proc.pid)
+        except Exception:
+            pass
+
+
+def _stopper(ctx):
+    return (lambda: ctx.cancelled) if ctx is not None else None
+
+
+def probe(src: str, measure: bool = True, should_stop=None) -> Probe:
+    """Read duration and streams from ffmpeg's banner (no ffprobe needed).
+    With `measure`, a file whose header has no duration is read through to
+    find it (stopped as soon as `should_stop()` says so)."""
     try:
         proc = subprocess.run([ffmpeg_path(), "-hide_banner", "-nostdin", "-i", src],
                               stdin=subprocess.DEVNULL, capture_output=True,
@@ -80,25 +96,36 @@ def probe(src: str) -> Probe:
             info.width, info.height = info.height, info.width
     elif re.search(r"Stream #\d+:\d+.*?: Video:", text):
         info.has_video = True
-    if info.duration <= 0 and (info.has_video or info.has_audio):
-        info.duration = _measure_duration(src)
+    if measure and info.duration <= 0 and (info.has_video or info.has_audio):
+        info.duration = _measure_duration(src, should_stop)
     return info
 
 
 _TIME = re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
 
 
-def _measure_duration(src: str) -> float:
+def _measure_duration(src: str, should_stop=None, timeout: float = 120.0) -> float:
     """Length of a file whose header does not give it (screen or browser
     recordings in WEBM): read through it without decoding anything."""
     try:
-        proc = subprocess.run([ffmpeg_path(), "-hide_banner", "-nostdin", "-i", src,
-                               "-c", "copy", "-f", "null", "-"],
-                              stdin=subprocess.DEVNULL, capture_output=True,
-                              creationflags=_NO_WINDOW, timeout=120)
-    except (subprocess.TimeoutExpired, OSError):
+        proc = subprocess.Popen([ffmpeg_path(), "-hide_banner", "-nostdin", "-i", src,
+                                 "-c", "copy", "-f", "null", "-"],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, creationflags=_NO_WINDOW)
+    except (OSError, UserError):
         return 0.0
-    found = _TIME.findall(proc.stderr.decode("utf-8", "replace"))
+    _tie(proc)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            _, err = proc.communicate(timeout=0.25)
+            break
+        except subprocess.TimeoutExpired:
+            if (should_stop is not None and should_stop()) or time.monotonic() > deadline:
+                proc.kill()
+                proc.communicate()
+                return 0.0
+    found = _TIME.findall(err.decode("utf-8", "replace"))
     if not found:
         return 0.0
     h, mi, sec = found[-1]
@@ -128,12 +155,7 @@ def _run(args: list[str], duration: float, ctx, label: str) -> None:
     err = tempfile.TemporaryFile()
     proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=err, creationflags=_NO_WINDOW)
-    if os.name == "nt":
-        try:
-            from ..win.jobobject import kill_with_cerclic
-            kill_with_cerclic(proc.pid)
-        except Exception:
-            pass
+    _tie(proc)
     stop = threading.Event()
 
     def watchdog():
@@ -187,7 +209,7 @@ EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 def compress_video(src: str, crf: int = 27, max_short_side: int = 1080, ctx=None) -> str:
     """Lighter H.264 MP4, at most 1080p (short side, so phone videos filmed
     upright keep their 1080 x 1920), readable everywhere."""
-    info = probe(src)
+    info = probe(src, should_stop=_stopper(ctx))
     if not info.has_video and info.has_audio:     # a sound in a video file (.webm...)
         return compress_audio(src, ctx=ctx)
     _need_video(info)
@@ -204,7 +226,7 @@ def compress_video(src: str, crf: int = 27, max_short_side: int = 1080, ctx=None
 
 def to_mp4(src: str, ctx=None) -> str:
     """H.264 + AAC MP4 at high quality: plays on every phone, PC and site."""
-    info = probe(src)
+    info = probe(src, should_stop=_stopper(ctx))
     _need_video(info)
     out = output_for(src, "mp4", new_ext=".mp4")
     _run(["-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-vf", EVEN,
@@ -220,7 +242,7 @@ GIF_MAX_SECONDS = 120
 def to_gif(src: str, fps: int = 12, width: int = 480, ctx=None) -> str:
     """Palette-optimised GIF, 480 px wide at most. Two passes (palette, then
     frames) so memory stays flat whatever the length."""
-    info = probe(src)
+    info = probe(src, should_stop=_stopper(ctx))
     _need_video(info)
     if info.duration > GIF_MAX_SECONDS:
         raise UserError("Vidéo trop longue pour un GIF (plus de 2 minutes : il "
@@ -262,7 +284,7 @@ class _Half:
 
 def extract_mp3(src: str, ctx=None) -> str:
     from ..errors import NothingToDo
-    info = probe(src)
+    info = probe(src, should_stop=_stopper(ctx))
     if not info.has_audio:
         raise NothingToDo("Cette vidéo n'a pas de son.")
     out = output_for(src, "audio", new_ext=".mp3")
@@ -295,7 +317,7 @@ def trim_media(src: str, start: float, end: float, ctx=None) -> str:
     """Keep from `start` to `end` seconds. Videos become an MP4 readable
     everywhere; sounds keep their format (MP3 for the rarer ones)."""
     from ..paths import ext_of, kind_of
-    info = probe(src)
+    info = probe(src, should_stop=_stopper(ctx))
     duration = info.duration
     start = max(0.0, float(start))
     end = float(end)
@@ -329,7 +351,7 @@ def mute_video(src: str, ctx=None) -> str:
     """Same video without its sound, not re-encoded (instant, no quality loss)."""
     from ..errors import NothingToDo
     from ..paths import ext_of
-    info = probe(src)
+    info = probe(src, should_stop=_stopper(ctx))
     _need_video(info)
     if not info.has_audio:
         raise NothingToDo("Cette vidéo n'a pas de son.")
@@ -359,7 +381,7 @@ def rotate_video(src: str, degrees: int = 90, ctx=None) -> str:
     deg = int(degrees) % 360
     if deg not in _TRANSPOSE:
         raise ValueError("rotation must be a multiple of 90 degrees")
-    info = probe(src)
+    info = probe(src, should_stop=_stopper(ctx))
     _need_video(info)
     out = output_for(src, "rotated", new_ext=".mp4")
     _run(["-i", src, "-map", "0:v:0", "-map", "0:a:0?",
@@ -376,7 +398,7 @@ def audio_to_mp3(src: str, ctx=None) -> str:
     from ..paths import ext_of
     if ext_of(src) == ".mp3":
         raise NothingToDo("C'est déjà un MP3.")
-    info = probe(src)
+    info = probe(src, should_stop=_stopper(ctx))
     if not info.has_audio:
         raise UserError("Aucun son dans ce fichier.")
     out = output_for(src, "mp3", new_ext=".mp3")
@@ -397,12 +419,7 @@ def _capture(args: list[str], timeout: float = 20.0, should_stop=None) -> bytes:
                              "error", *args], stdin=subprocess.DEVNULL,
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             creationflags=_NO_WINDOW)
-    if os.name == "nt":
-        try:
-            from ..win.jobobject import kill_with_cerclic
-            kill_with_cerclic(proc.pid)
-        except Exception:
-            pass
+    _tie(proc)
     deadline = time.monotonic() + timeout
     while True:
         try:
@@ -443,7 +460,7 @@ def waveform_png(src: str, width: int, height: int, color: str = "#F2A93B",
 def compress_audio(src: str, ctx=None) -> str:
     """Lighter MP3 (96 kbit/s, plenty for voice and fine for music on a phone)."""
     from ..errors import NothingToDo
-    info = probe(src)
+    info = probe(src, should_stop=_stopper(ctx))
     if not info.has_audio:
         raise UserError("Aucun son dans ce fichier.")
     out = output_for(src, "compressed", new_ext=".mp3")

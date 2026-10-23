@@ -87,7 +87,7 @@ def load_preview(path: str, size: int):
         return load_pdf_preview(path, 0, size, size, None)[0]
     if k == "video":
         from ..actions import video
-        info = video.probe(path)
+        info = video.probe(path, measure=False)      # (a frame near the start is enough)
         t = min(1.0, info.duration / 3) if info.duration else 0.0
         img = QImage.fromData(video.frame_png(path, t, size, size), "PNG")
         return img if not img.isNull() else None

@@ -23,6 +23,16 @@ HANDLE = 12
 PLACE_MARGIN = 10   # px around the page (room for the handles)
 
 
+def pictures_folder() -> str:
+    """Where to look for a photo of a signature: Pictures, else the home folder."""
+    from PySide6.QtCore import QStandardPaths
+    for loc in (QStandardPaths.PicturesLocation, QStandardPaths.HomeLocation):
+        d = QStandardPaths.writableLocation(loc)
+        if d and os.path.isdir(d):
+            return d
+    return os.path.expanduser("~")
+
+
 def signature_path() -> str:
     return os.path.join(config_dir(), "signature.png")
 
@@ -222,7 +232,7 @@ class SignaturePad(EditorWindow):
         self.pause_dismiss(True)
         try:
             src, _ = QFileDialog.getOpenFileName(
-                self, "Choisir une image de ta signature", "",
+                self, "Choisir une image de ta signature", pictures_folder(),
                 "Images (*.png *.jpg *.jpeg *.webp *.heic *.bmp)")
         finally:
             self.pause_dismiss(False)

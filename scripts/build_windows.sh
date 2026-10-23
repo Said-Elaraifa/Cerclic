@@ -38,6 +38,7 @@ wine "$WINPY" -m PyInstaller cerclic.spec --noconfirm --clean < /dev/null 2>&1 |
 grep -E "ERROR|WARNING: (Hidden|lib not found|Library not found)|Building COLLECT" build/pyinstaller.log || true
 test -f dist/Cerclic/Cerclic.exe
 cp dist_native/CerclicOpen.exe dist/Cerclic/CerclicOpen.exe
+cp assets/LICENCES.txt dist/Cerclic/LICENCES.txt
 
 echo "== 4/5 portable zip"
 mkdir -p dist_installer

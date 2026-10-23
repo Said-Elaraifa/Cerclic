@@ -544,7 +544,7 @@ def test_gif_two_pass_and_length_limit(small_video, monkeypatch):
     assert all(f is None or 0 <= f <= 1 for f in seen)
     from cerclic.actions import video
     real = video.probe
-    monkeypatch.setattr(video, "probe", lambda p: video.Probe(600.0, True, True, 640, 480)
+    monkeypatch.setattr(video, "probe", lambda p, **kw: video.Probe(600.0, True, True, 640, 480)
                         if p == small_video else real(p))
     res = engine.run("vid_gif", [small_video], {})
     assert not res.ok and "trop longue" in res.error

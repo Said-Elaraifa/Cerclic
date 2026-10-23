@@ -1,0 +1,22 @@
+﻿Cerclic utilise des composants libres. Voici leurs licences et où trouver
+leur code source.
+
+Python 3.12 : licence PSF. https://www.python.org/
+Qt 6.8 et PySide6 6.8 : LGPL v3. https://www.qt.io/ et https://wiki.qt.io/Qt_for_Python
+  Les bibliothèques Qt sont des fichiers séparés (dossier _internal), que
+  l'on peut remplacer par d'autres versions compatibles.
+PyMuPDF 1.28 et MuPDF : GNU AGPL v3 (ou licence commerciale Artifex).
+  https://github.com/pymupdf/PyMuPDF
+pikepdf 10 : MPL 2.0 ; qpdf : Apache 2.0. https://github.com/pikepdf/pikepdf
+pdf2docx 0.5 : MIT. https://github.com/ArtifexSoftware/pdf2docx
+python-docx : MIT. https://github.com/python-openxml/python-docx
+Pillow 12 : MIT-CMU. https://python-pillow.org/
+pillow-heif 1.8 : BSD-3 pour son code ; ses bibliothèques libheif et libde265
+  sont sous LGPL v3, x265 sous GPL v2. https://github.com/bigcat88/pillow_heif
+NumPy : BSD. OpenCV : Apache 2.0. lxml : BSD. fontTools : MIT.
+FFmpeg 7.1 (ffmpeg\ffmpeg.exe, un programme à part) : GPL v3, version
+  « essentials » de gyan.dev, fournie par imageio-ffmpeg.
+  https://ffmpeg.org/ , https://www.gyan.dev/ffmpeg/builds/ ,
+  https://github.com/imageio/imageio-ffmpeg
+PyInstaller (programme de démarrage) : GPL v2 avec exception de liaison.
+  https://pyinstaller.org/

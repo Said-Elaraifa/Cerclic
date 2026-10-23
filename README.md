@@ -67,7 +67,8 @@ Une version portable (`Cerclic-x.y.z-portable.zip`) est aussi fournie :
 décompresse-la où tu veux et double-clique sur `Cerclic.exe`. Elle n'ajoute rien
 à Windows : le raccourci clavier marche tout de suite, le clic droit et le
 démarrage avec Windows s'activent dans ses réglages (décoche-les avant de
-supprimer son dossier).
+supprimer son dossier). Ses réglages, ta signature et son journal restent dans
+le dossier « Données Cerclic », à côté de `Cerclic.exe`.
 
 ## Réglages
 
@@ -81,7 +82,8 @@ Cerclic le dit et garde l'ancienne.
 Astuce : une souris à boutons programmables peut envoyer les touches F13 à F24,
 acceptées seules comme raccourci. La roue s'ouvre alors d'un clic de ce bouton.
 
-En cas de souci, le journal `cerclic.log` se trouve dans `%APPDATA%\Cerclic`.
+En cas de souci, le journal `cerclic.log` se trouve dans `%APPDATA%\Cerclic`
+(version portable : dans « Données Cerclic »).
 
 ## Désinstaller
 
@@ -98,6 +100,9 @@ pip install -r requirements-dev.txt
 pytest                      # 210+ tests : actions, interface, communication
 pythonw run_cerclic.py      # lancer depuis le code
 ```
+
+Les licences des composants utilisés sont dans `assets/LICENCES.txt`, copié
+à côté de `Cerclic.exe`.
 
 Construire l'application : le workflow GitHub (`.github/workflows/build.yml`)
 fabrique l'exécutable, l'installateur et la version portable sur Windows ;

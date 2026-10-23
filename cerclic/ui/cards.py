@@ -48,20 +48,23 @@ def reveal_path(path: str) -> None:
         pass
 
 
-def undo_outputs(outputs: list[str]) -> None:
-    """Delete files Cerclic created, then the folders it created if now empty."""
+def undo_outputs(outputs: list[str]) -> list[str]:
+    """Delete files Cerclic created, then the folders it created if now empty.
+    Returns the files that could not be deleted (open in another app...)."""
+    kept: list[str] = []
     for p in outputs:
         try:
             if os.path.isfile(p):
                 os.remove(p)
         except OSError:
-            pass
+            kept.append(p)
     for d in sorted({os.path.dirname(p) for p in outputs}, key=len, reverse=True):
         try:
             if os.path.isdir(d) and not os.listdir(d):
                 os.rmdir(d)
         except OSError:
             pass
+    return kept
 
 
 class _Bar(QWidget):
@@ -291,6 +294,12 @@ class JobCard(Card):
             n = len(self._outputs)
             text = (_elided(self._status, os.path.basename(self._outputs[0]), 290)
                     if n == 1 else f"{n} fichiers créés")
+            notes = list(getattr(result, "notes", []) or [])
+            if len(notes) > 1:
+                note = (note + "\n" if note else "") + (
+                    f"{len(notes)} fichiers laissés de côté, par exemple : {notes[0]}")
+            elif notes:
+                note = (note + "\n" if note else "") + notes[0]
             self._status.setText(text + (f"\n{note}" if note else ""))
             row = QHBoxLayout()
             row.setSpacing(8)
@@ -344,13 +353,22 @@ class JobCard(Card):
         self.close()
 
     def _undo(self):
-        undo_outputs(self._outputs)
+        kept = undo_outputs(self._outputs)
+        self._status.setToolTip("")
+        if kept:                       # open in another app: say so, keep the buttons
+            self.set_accent(WARN)
+            self._head.setText("Suppression impossible")
+            self._status.setText("Le fichier est sans doute ouvert dans une autre "
+                                 "application : ferme-la, puis réessaie.")
+            self._outputs = kept
+            self.adjustSize()
+            self.start_auto_close(8000)
+            return
         for b in getattr(self, "_buttons", ()):
             b.hide()
         self.set_accent(MUTED)
         n = len(self._outputs)
         self._head.setText("Fichier supprimé" if n == 1 else "Fichiers supprimés")
-        self._status.setToolTip("")
         self._status.setText("Ton fichier d'origine n'a pas bougé.")
         self._outputs = []
         self.adjustSize()

@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 
 APP_DIR_NAME = "Cerclic"
+PORTABLE_DATA = "Données Cerclic"     # beside Cerclic.exe in the portable version
 
 DEFAULTS: dict = {
     "signature": "",            # path to the signature PNG (drawn or imported)
@@ -22,12 +24,47 @@ DEFAULTS: dict = {
 # Keys from older versions (gesture, hold_ms...) are dropped on load.
 
 
+def is_portable() -> bool:
+    """The portable version (unzipped anywhere): no uninstaller beside it."""
+    if not getattr(sys, "frozen", False):
+        return False
+    return not os.path.exists(os.path.join(os.path.dirname(sys.executable),
+                                           "unins000.exe"))
+
+
+_portable_dir: str | None = None
+
+
+def _portable_data() -> str | None:
+    """The portable version keeps its settings, signature and log beside it,
+    apart from an installed Cerclic (when that folder can be written to)."""
+    global _portable_dir
+    if _portable_dir is None:
+        d = os.path.join(os.path.dirname(sys.executable), PORTABLE_DATA)
+        try:
+            os.makedirs(d, exist_ok=True)
+            probe = os.path.join(d, ".ecriture")
+            with open(probe, "w"):
+                pass
+            os.remove(probe)
+            _portable_dir = d
+        except OSError:
+            _portable_dir = ""
+    return _portable_dir or None
+
+
 def config_dir() -> str:
     if os.name == "nt":
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
     else:
         base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    d = os.path.join(base, APP_DIR_NAME)
+    name = APP_DIR_NAME
+    if is_portable():
+        here = _portable_data()
+        if here:
+            return here
+        name = APP_DIR_NAME + " Portable"
+    d = os.path.join(base, name)
     os.makedirs(d, exist_ok=True)
     return d
 

@@ -122,6 +122,20 @@ def remove_context_menu() -> None:
     _notify_shell()
 
 
+def context_menu_mine() -> bool:
+    """True if the entry (where it exists) launches this copy of Cerclic."""
+    winreg = _winreg()
+    want = open_command()
+    for ext in SUPPORTED_EXTS:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _verb_key(ext) + r"\command") as k:
+                if winreg.QueryValueEx(k, "")[0] == want:
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def context_menu_ok() -> bool:
     """True if the entry exists for every type and launches this copy."""
     winreg = _winreg()

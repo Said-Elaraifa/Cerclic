@@ -78,6 +78,7 @@ jobs:
         run: |
           pyinstaller cerclic.spec --noconfirm --clean
           Copy-Item dist_native/CerclicOpen.exe dist/Cerclic/CerclicOpen.exe
+          Copy-Item assets/LICENCES.txt dist/Cerclic/LICENCES.txt
 
       - name: Portable zip
         shell: pwsh

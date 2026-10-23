@@ -718,9 +718,19 @@ def unlock_pdf(src: str, password: str = "") -> str:
     import pikepdf
     if not is_encrypted(src):
         raise NothingToDo("Ce PDF n'est pas protégé.")
-    try:
-        pdf = pikepdf.open(src, password=password or "")
-    except pikepdf.PasswordError:
+    pdf = None
+    tries = [password or ""]
+    try:            # older PDFs (RC4, AES-128) store accented passwords as Latin-1
+        tries.append((password or "").encode("latin-1"))
+    except UnicodeEncodeError:
+        pass
+    for attempt in tries:
+        try:
+            pdf = pikepdf.open(src, password=attempt)
+            break
+        except pikepdf.PasswordError:
+            continue
+    if pdf is None:
         raise NeedsPassword("Mot de passe incorrect." if password else
                             f"« {os.path.basename(src)} » est protégé par un mot de passe.",
                             path=src)

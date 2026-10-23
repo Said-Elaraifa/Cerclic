@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-from ..errors import NothingToDo
+from ..errors import LeftOut, NothingToDo
 from ..paths import kind_of
 from . import images, pdf, video
 from .common import check, progress
@@ -81,6 +81,8 @@ def each(paths, ctx, fn) -> list[str]:
             if n == 1:
                 raise
             skipped = exc
+            if isinstance(exc, LeftOut) and ctx is not None and hasattr(ctx, "note"):
+                ctx.note(str(exc))          # said on the result card
             continue
         if isinstance(out, list):
             outputs.extend(out)

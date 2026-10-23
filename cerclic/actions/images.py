@@ -15,7 +15,7 @@ from typing import Callable, Sequence
 
 from PIL import Image, ImageOps, ImageSequence
 
-from ..errors import NothingToDo, UserError
+from ..errors import LeftOut, NothingToDo, UserError
 from ..paths import ext_of, output_for
 
 # Allow very large panoramas, but still refuse absurd (malicious) sizes.
@@ -123,12 +123,21 @@ def load(src: str) -> Picture:
 
 
 def _one_page(src: str, pic: Picture) -> None:
-    """Edits write one picture: refuse a multi-page TIFF rather than silently
-    keep only its first page."""
+    """Edits write one picture: leave out a multi-page TIFF rather than
+    silently keep only its first page."""
     if pic.pages > 1:
-        raise UserError(f"« {os.path.basename(src)} » a {pic.pages} pages : seule la "
-                        "première serait gardée. Utilise « En PDF » pour les garder "
-                        "toutes.")
+        raise LeftOut(f"« {os.path.basename(src)} » a {pic.pages} pages : seule la "
+                      "première serait gardée. Utilise « En PDF » pour les garder "
+                      "toutes.")
+
+
+def page_count(src: str) -> int:
+    """Pages of a TIFF (scan, fax); 1 for any other picture."""
+    try:
+        with Image.open(src) as im:
+            return (getattr(im, "n_frames", 1) or 1) if im.format == "TIFF" else 1
+    except Exception:
+        return 1
 
 
 def tiff_pages(src: str):
