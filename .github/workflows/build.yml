@@ -23,11 +23,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Native helpers (CerclicOpen.exe, CerclicMenu.dll)
-        env:
-          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get -o Acquire::Retries=3 update -q
-          sudo apt-get install -y -q --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+          # sudo drops the environment: no question may wait for an answer
+          APT="sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout 600 apt-get -q -o Acquire::Retries=3 -o Dpkg::Use-Pty=0"
+          $APT update < /dev/null || { echo "::error::apt-get update ($?)"; exit 1; }
+          $APT install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 < /dev/null \
+            || { echo "::error::apt-get install ($?)"; exit 1; }
           mkdir -p dist_native
           cd native
           P=x86_64-w64-mingw32
