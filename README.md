@@ -2,7 +2,8 @@
 
 Une roue d'actions rapides sur tes fichiers, sous Windows 10 et 11 et sur Mac
 (macOS 12 ou plus récent) : rogner, signer, compresser, convertir, raccourcir
-une vidéo… en un geste, sans ouvrir d'autre application.
+une vidéo, mettre au format Instagram ou TikTok… en un geste, sans ouvrir
+d'autre application.
 
 ![Aperçu de la roue](docs/preview_image.png)
 
@@ -28,12 +29,31 @@ haut, dans le sens des aiguilles d'une montre), ou les flèches puis Entrée.
 
 Tout se passe dans de petites fenêtres qui s'ouvrent là où était la roue. Ton
 fichier d'origine n'est jamais modifié : chaque résultat est un nouveau
-fichier, par exemple `photo (compressé).jpg`, à côté de l'original ou dans le
-dossier de ton choix. « Supprimer » sur la carte de résultat l'efface si tu
-n'en veux pas.
+fichier, par exemple `photo (compressé).jpg`, à côté de l'original, dans le
+dossier de ton choix, ou là où tu le dis à chaque fois. « Supprimer » sur la
+carte de résultat l'efface si tu n'en veux pas.
+
+**Réseaux sociaux** (images et vidéos) : « Réseaux » met un fichier aux
+dimensions exactes attendues, avec un aperçu du résultat.
+
+| Format | Taille | Pour |
+|---|---|---|
+| Carré 1:1 | 1080 × 1080 | publication Instagram, Facebook, LinkedIn |
+| Portrait 4:5 | 1080 × 1350 | publication Instagram ou Facebook (la plus grande dans le fil) |
+| Grille 3:4 | 1080 × 1440 | Instagram, à la forme de la grille du profil |
+| Story 9:16 | 1080 × 1920 | plein écran de téléphone : Story, Reels, TikTok, Shorts |
+| Paysage 16:9 | 1920 × 1080 | écran d'ordinateur : YouTube, présentation, X |
+| Bannière 1,91:1 | 1200 × 630 | lien partagé, image large sur Facebook, LinkedIn, X |
+
+« Remplir » couvre tout le cadre : glisse l'image pour choisir la partie
+gardée, molette pour zoomer. « Fond flou », « Fond blanc » ou « Fond noir »
+gardent toute l'image. Avec plusieurs fichiers, ‹ › passent de l'un à l'autre
+(chacun garde son cadrage). Les images sortent en JPG sans la position GPS,
+les vidéos en MP4 (H.264, son AAC).
 
 **Images** (JPG, PNG, WEBP, HEIC d'iPhone, AVIF, GIF, BMP, TIFF) : rogner
-(formats 1:1, 4:5, 16:9…), pivoter ou retourner en miroir, redimensionner,
+(formats 1:1, 4:5, 16:9…), format réseaux sociaux, pivoter ou retourner en
+miroir, redimensionner,
 compresser, convertir en JPG, PNG ou WEBP, copier pour coller où tu veux,
 réunir en un PDF, assembler plusieurs images en une, anonymiser (retirer la
 position GPS, le modèle du téléphone, la date… sans perte de qualité).
@@ -43,17 +63,19 @@ souris), rogner, compresser, fusionner, organiser les pages (trier, tourner,
 supprimer, extraire), convertir en Word, en images ou en texte, diviser,
 pivoter, filigrane, numéros de page, protéger par mot de passe, déverrouiller.
 
-**Vidéo** : raccourcir, compresser, convertir en MP4 ou en GIF, extraire le
-son, couper le son, pivoter.
+**Vidéo** : raccourcir, format réseaux sociaux, compresser, convertir en MP4
+ou en GIF, extraire le son, couper le son, pivoter.
 
 **Son** (MP3, M4A, WAV, notes vocales OPUS/OGG, FLAC…) : raccourcir,
 convertir en MP3, compresser.
 
 ## Installer
 
-**Windows.** Lance `CerclicSetup-x.y.z.exe` : pas de droits administrateur,
-rien à configurer. Cerclic démarre avec Windows et se range près de l'horloge.
-Une mise à jour s'installe par-dessus et garde tes réglages. Tant que Cerclic
+**Windows.** Lance `CerclicSetup-x.y.z.exe` : pas de droits administrateur.
+L'installation propose son dossier (dans ton profil) et te laisse en choisir
+un autre. Cerclic démarre avec Windows et se range près de l'horloge.
+Une mise à jour s'installe par-dessus et garde tes réglages (choisir un autre
+dossier à ce moment-là y déménage Cerclic). Tant que Cerclic
 n'est pas signé numériquement, Windows peut afficher « Windows a protégé votre
 ordinateur » : « Informations complémentaires », puis « Exécuter quand même ».
 
@@ -74,8 +96,9 @@ y lit seulement les fichiers sélectionnés.
 
 Ouvre Cerclic depuis son icône (menu Démarrer, Bureau, Applications) ou depuis
 son icône près de l'horloge ou dans la barre des menus. Sept sections : Général,
-Raccourci clavier, Clic droit, Fichiers créés (à côté de l'original ou dans un
-dossier de ton choix), Signature, Qualité, À propos. Tout s'applique aussitôt.
+Raccourci clavier, Clic droit, Fichiers créés (à côté de l'original, dans un
+dossier de ton choix, ou « Me demander à chaque fois »), Signature, Qualité,
+À propos. Tout s'applique aussitôt.
 
 En cas de souci, le journal `cerclic.log` se trouve dans `%APPDATA%\Cerclic`
 (Windows) ou `~/Library/Application Support/Cerclic` (Mac) ; « À propos »,
@@ -95,7 +118,7 @@ l'ouverture de session), puis mets Cerclic.app à la corbeille.
 python -m venv .venv
 .venv\Scripts\activate          (Mac : source .venv/bin/activate)
 pip install -r requirements-dev.txt
-pytest                          # 240+ tests : actions, interface, Windows, Mac
+pytest                          # 290+ tests : actions, interface, Windows, Mac
 python run_cerclic.py           # lancer depuis le code
 ```
 

@@ -61,6 +61,18 @@ def _category_icon(cat_id: str) -> str:
             "audio": "cat_audio"}.get(cat_id, "dot")
 
 
+def ring_split(actions: list) -> tuple[list, list]:
+    """(the actions on the ring, those under "Plus"). The main ones go on the
+    ring in catalogue order; when they do not all fit beside "Plus", the last
+    ones join the others under "Plus": every action stays reachable."""
+    primary = [a for a in actions if a.primary]
+    secondary = [a for a in actions if not a.primary]
+    if not primary:                              # only secondary ones: shown directly
+        primary, secondary = secondary, []
+    room = MAX_SLICES - (1 if secondary or len(primary) > MAX_SLICES else 0)
+    return primary[:room], primary[room:] + secondary
+
+
 def _mix(a: QColor, b: QColor, t: float) -> QColor:
     t = max(0.0, min(1.0, t))
     return QColor(round(a.red() + (b.red() - a.red()) * t),
@@ -189,23 +201,12 @@ class Wheel(QWidget):
             cat_id = payload
             _, hexcol = CATEGORIES[cat_id]
             col = QColor(hexcol)
-            actions = self._menu.get(cat_id, [])
-            primary = [a for a in actions if a.primary]
-            secondary = [a for a in actions if not a.primary]
-            if level == "more":
-                chosen = secondary
-            elif secondary and len(primary) + 1 > MAX_SLICES:
-                chosen = primary[:MAX_SLICES - 1]
-            else:
-                chosen = primary
-            for a in chosen:
+            main, more = ring_split(self._menu.get(cat_id, []))
+            for a in (more if level == "more" else main):
                 out.append(Slice(a.id, a.label, a.icon, col, "action", a, a.desc))
-            if level == "actions" and secondary:
+            if level == "actions" and more:
                 out.append(Slice("__more__", "Plus", "more", col, "more", cat_id,
                                  "D'autres outils"))
-            if level == "actions" and not primary and secondary:
-                out = [Slice(a.id, a.label, a.icon, col, "action", a, a.desc)
-                       for a in secondary]
         elif level == "choices":
             action: Action = payload
             _, hexcol = CATEGORIES[action.category]

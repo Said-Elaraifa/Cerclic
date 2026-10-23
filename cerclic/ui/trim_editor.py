@@ -325,7 +325,8 @@ class TrimEditor(EditorWindow):
         if self.frame is not None and info.width and info.height:
             room_w, room_h = self.room(560, 420)
             width = self.track.width()
-            fw, fh = fit_view(info.width, info.height, width, max(160, room_h - 120),
+            seen_w, seen_h = info.display_size          # (stretched pixels made square)
+            fw, fh = fit_view(seen_w, seen_h, width, max(160, room_h - 120),
                               min_side=160, max_scale=10)
             self.frame.setFixedSize(QSize(fw, fh))
             self.refit()

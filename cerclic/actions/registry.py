@@ -7,6 +7,7 @@ returning the output paths. `needs` lists what the UI must gather first:
     "place_sig"  the signature placement popup
     "pages"      the page organiser popup (PDF)
     "trim"       the cutting popup (video, sound)
+    "social"     the social networks popup (format, background, framing)
     "text"       a text typed in a bubble
     "new_password"  a password typed in a bubble
 `choices` turns the action into a small ring of variants (rotate left/right...).
@@ -15,12 +16,13 @@ returning the output paths. `needs` lists what the UI must gather first:
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Callable
 
-from ..errors import LeftOut, NothingToDo
-from ..paths import kind_of
-from . import images, pdf, video
+from ..errors import LeftOut, NeedsPassword, NothingToDo, UserError
+from ..paths import kind_of, undone_on_error
+from . import images, pdf, social, video
 from .common import check, progress
 
 # Category ids, French labels and ring colours.
@@ -67,16 +69,23 @@ class Action:
 
 def each(paths, ctx, fn) -> list[str]:
     """Run fn on every file, with progress. In a batch, files that need nothing
-    (already small...) are skipped; if all of them are, the reason is shown."""
+    (already small...) are skipped; if all of them are, the reason is shown.
+    A file that cannot be done (unreadable...) does not stop the others: the
+    result card names it. A PDF that needs its password still stops the
+    batch, so that it can be asked for."""
     outputs: list[str] = []
     skipped: NothingToDo | None = None
+    failed: UserError | None = None
     n = len(paths)
     for i, p in enumerate(paths):
         check(ctx)
         if n > 1:
             progress(ctx, i / n, f"Fichier {i + 1} sur {n}")
         try:
-            out = fn(p)
+            with undone_on_error():
+                out = fn(p)
+        except NeedsPassword:
+            raise
         except NothingToDo as exc:
             if n == 1:
                 raise
@@ -84,10 +93,20 @@ def each(paths, ctx, fn) -> list[str]:
             if isinstance(exc, LeftOut) and ctx is not None and hasattr(ctx, "note"):
                 ctx.note(str(exc))          # said on the result card
             continue
+        except UserError as exc:
+            if n == 1:
+                raise
+            text = f"« {os.path.basename(p)} » : {exc}"
+            failed = failed or UserError(text)
+            if ctx is not None and hasattr(ctx, "note"):
+                ctx.note(text)
+            continue
         if isinstance(out, list):
             outputs.extend(out)
         elif out:
             outputs.append(out)
+    if not outputs and failed is not None:
+        raise failed
     if not outputs and skipped is not None:
         raise skipped
     return outputs
@@ -122,11 +141,34 @@ def _turn_image(p: str, o: dict) -> str:
     return images.rotate_image(p, int(o.get("degrees", 90)), _q(o))
 
 
+def _framing(o: dict, path: str) -> tuple:
+    """(centre, zoom) the user chose for this file in the social popup;
+    centred and whole for the files of a batch they did not look at."""
+    f = (o.get("social_frames") or {}).get(path)
+    if f:
+        return (float(f[0]), float(f[1])), float(f[2])
+    return (0.5, 0.5), 1.0
+
+
+def _social_image(p: str, o: dict) -> str:
+    return social.social_image(p, o["social"], o.get("social_mode", "fill"),
+                               *_framing(o, p), quality=_q(o))
+
+
+def _social_video(p: str, o: dict, ctx) -> str:
+    return social.social_video(p, o["social"], o.get("social_mode", "blur"),
+                               *_framing(o, p), ctx=ctx)
+
+
 ACTIONS: list[Action] = [
     # ---- Images ----
     Action("img_crop", "Rogner", "image", frozenset({"image"}),
            lambda paths, o, ctx: [images.crop_image(paths[0], o["crop_box"], _q(o))],
            icon="crop", needs=("crop",), max_files=1, desc="Garder une partie", title="Rognage"),
+    Action("img_social", "Réseaux", "image", frozenset({"image"}),
+           lambda paths, o, ctx: each(paths, ctx, lambda p: _social_image(p, o)),
+           icon="social", needs=("social",), desc="Insta, Story, mobile, PC",
+           title="Format réseaux sociaux"),
     Action("img_rotate", "Pivoter", "image", frozenset({"image"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: _turn_image(p, o)),
            icon="rotate", choices=IMAGE_TURN_CHOICES, desc="Tourner ou retourner", title="Rotation"),
@@ -149,12 +191,12 @@ ACTIONS: list[Action] = [
            choices=(Choice("jpg", "JPG", "jpg", (("fmt", "jpg"),)),
                     Choice("png", "PNG", "png", (("fmt", "png"),)),
                     Choice("webp", "WEBP", "webp", (("fmt", "webp"),)))),
-    Action("img_copy", "Copier", "image", frozenset({"image"}),
-           lambda paths, o, ctx: [], icon="copy", max_files=1, ui="clipboard",
-           desc="À coller où tu veux", title="Copie"),
     Action("img_to_pdf", "En PDF", "image", frozenset({"image"}),
            lambda paths, o, ctx: [pdf.images_to_pdf(paths, ctx=ctx)],
            icon="cat_pdf", desc="Une page par image", title="Création du PDF"),
+    Action("img_copy", "Copier", "image", frozenset({"image"}),
+           lambda paths, o, ctx: [], icon="copy", max_files=1, ui="clipboard",
+           desc="À coller où tu veux", title="Copie"),
     Action("img_assemble", "Assembler", "image", frozenset({"image"}),
            lambda paths, o, ctx: [images.assemble_images(
                paths, o.get("layout", "row"), _q(o), ctx=ctx)],
@@ -165,7 +207,8 @@ ACTIONS: list[Action] = [
     Action("img_clean", "Anonymiser", "image", frozenset({"image"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: images.strip_metadata(
                p, _q(o))),
-           icon="shield", desc="Retire GPS, appareil, date", title="Anonymisation"),
+           icon="shield", primary=False, desc="Retire GPS, appareil, date",
+           title="Anonymisation"),
 
     # ---- PDF ----
     Action("pdf_sign", "Signer", "pdf", frozenset({"pdf"}),
@@ -238,6 +281,10 @@ ACTIONS: list[Action] = [
            lambda paths, o, ctx: [video.trim_media(paths[0], o["trim_start"],
                                                    o["trim_end"], ctx=ctx)],
            icon="trim", needs=("trim",), max_files=1, desc="Garder un passage", title="Découpe"),
+    Action("vid_social", "Réseaux", "video", frozenset({"video"}),
+           lambda paths, o, ctx: each(paths, ctx, lambda p: _social_video(p, o, ctx)),
+           icon="social", needs=("social",), desc="Reels, TikTok, Shorts, PC",
+           title="Format réseaux sociaux"),
     Action("vid_compress", "Compresser", "video", frozenset({"video"}),
            lambda paths, o, ctx: each(paths, ctx, lambda p: video.compress_video(
                p, ctx=ctx)),

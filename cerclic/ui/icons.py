@@ -152,6 +152,18 @@ def draw_icon(p: QPainter, name: str, cx: float, cy: float, size: float,
         path.closeSubpath()
         p.setBrush(color)
         p.drawPath(path)
+    elif name == "social":                        # a phone showing a liked post
+        p.drawRoundedRect(QRectF(cx - r * 0.62, cy - r, r * 1.24, r * 2), r * 0.24, r * 0.24)
+        p.drawLine(QPointF(cx - r * 0.14, cy - r * 0.74), QPointF(cx + r * 0.14, cy - r * 0.74))
+        hx, hy, s = cx, cy + r * 0.06, r * 0.42
+        heart = QPainterPath(QPointF(hx, hy + s * 0.95))
+        heart.cubicTo(QPointF(hx - s * 1.3, hy + s * 0.05), QPointF(hx - s * 0.95, hy - s * 1.05),
+                      QPointF(hx, hy - s * 0.38))
+        heart.cubicTo(QPointF(hx + s * 0.95, hy - s * 1.05), QPointF(hx + s * 1.3, hy + s * 0.05),
+                      QPointF(hx, hy + s * 0.95))
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        p.drawPath(heart)
     elif name == "copy":
         p.drawRoundedRect(QRectF(cx - r * 0.85, cy - r * 0.55, r * 1.2, r * 1.4), 2.5, 2.5)
         p.drawRoundedRect(QRectF(cx - r * 0.35, cy - r * 0.95, r * 1.2, r * 1.4), 2.5, 2.5)

@@ -96,8 +96,9 @@ class Picture:
                        self.exif, self.dpi, self.source_format, self.pages)
 
 
-def load(src: str) -> Picture:
-    """Read an image (all frames if animated). The file is closed on return."""
+def load(src: str, first_frame: bool = False) -> Picture:
+    """Read an image (all frames if animated, unless `first_frame`). The file
+    is closed on return."""
     try:
         im = Image.open(src)
     except Image.UnidentifiedImageError:
@@ -107,7 +108,7 @@ def load(src: str) -> Picture:
         icc = im.info.get("icc_profile")
         dpi = im.info.get("dpi")
         n = getattr(im, "n_frames", 1) or 1
-        if n > 1 and fmt in _ANIMATED_FORMATS:
+        if n > 1 and fmt in _ANIMATED_FORMATS and not first_frame:
             frames, durations = [], []
             for fr in ImageSequence.Iterator(im):
                 durations.append(int(fr.info.get("duration", 100) or 100))

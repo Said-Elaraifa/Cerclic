@@ -47,5 +47,5 @@ def render(paths, summary, name, hover=-1, preview=None):
 app = QApplication(sys.argv)
 apply_app_theme(app)
 sample = os.environ.get("CERCLIC_PREVIEW_PHOTO")
-render(["photo.jpg"], "photo.jpg", "preview_image.png", hover=3, preview=sample)
+render(["photo.jpg"], "photo.jpg", "preview_image.png", hover=1, preview=sample)
 render(["a.jpg", "b.pdf", "c.mp4", "d.m4a"], "4 fichiers", "preview_mixed.png", hover=1)

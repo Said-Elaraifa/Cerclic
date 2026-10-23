@@ -93,7 +93,8 @@ def _ffmpeg() -> str:
 def _actions(work: str) -> str:
     """An iPhone photo converted, a photo rotated and turned into a PDF, the PDF
     drawn back into an image and protected, a short video made by ffmpeg then
-    cut: the real code paths."""
+    cut, the photo and the video made into social network formats: the real
+    code paths."""
     import subprocess
     from PIL import Image
     from . import engine
@@ -126,6 +127,18 @@ def _actions(work: str) -> str:
     res = engine.run("vid_trim", [video], {"trim_start": 0.0, "trim_end": 1.0})
     assert res.ok, f"vid_trim : {res.error}"
     done.append("vid_trim")
+    # social network formats, with the blurred background (the most demanding)
+    res = engine.run("img_social", [photo], {"social": "story", "social_mode": "blur"})
+    assert res.ok, f"img_social : {res.error}"
+    with Image.open(res.outputs[0]) as im:
+        assert im.size == (1080, 1920), im.size
+    done.append("img_social")
+    res = engine.run("vid_social", [video], {"social": "square", "social_mode": "blur"})
+    assert res.ok, f"vid_social : {res.error}"
+    from .actions.video import probe
+    info = probe(res.outputs[0])
+    assert (info.width, info.height) == (1080, 1080), (info.width, info.height)
+    done.append("vid_social")
     return ", ".join(done)
 
 

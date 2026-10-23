@@ -53,6 +53,29 @@ def tracking():
         _track.items = previous
 
 
+@contextlib.contextmanager
+def undone_on_error():
+    """What is reserved in this block (this thread) is removed again if the
+    block fails: a file of a batch that could not be done leaves nothing."""
+    items = getattr(_track, "items", None)
+    start = len(items) if items is not None else 0
+    try:
+        yield
+    except BaseException:
+        if items is not None:
+            import shutil
+            for p in reversed(items[start:]):
+                try:
+                    if os.path.isdir(p):
+                        shutil.rmtree(p, ignore_errors=True)
+                    elif os.path.exists(p):
+                        os.remove(p)
+                except OSError:
+                    pass
+            del items[start:]
+        raise
+
+
 _hooks: list = []
 
 

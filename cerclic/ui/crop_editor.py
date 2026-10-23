@@ -32,6 +32,12 @@ MIN_VIEW = 12       # smallest frame, in screen px
 
 def load_image_preview(path: str, max_w: int, max_h: int):
     """Upright preview that fits max_w x max_h, plus the full upright size."""
+    im, full = pil_preview(path, max_w, max_h)
+    return qimage_from_pil(im), full
+
+
+def pil_preview(path: str, max_w: int, max_h: int):
+    """The same, as a Pillow image."""
     from PIL import Image, ImageOps
     from ..actions import images as _images  # registers HEIC support
     _ = _images
@@ -48,7 +54,7 @@ def load_image_preview(path: str, max_w: int, max_h: int):
         im.load()
         up = ImageOps.exif_transpose(im)
     up.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
-    return qimage_from_pil(up), full
+    return up, full
 
 
 def probe_size(path: str, page: int = 0, password=None):

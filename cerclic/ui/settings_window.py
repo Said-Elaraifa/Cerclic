@@ -339,6 +339,10 @@ class _Page(QScrollArea):
         body = QWidget()
         body.setAttribute(Qt.WA_TranslucentBackground)
         self.setWidget(body)
+        # QScrollArea turns autoFillBackground on for its widget: Qt would then
+        # take this see-through page for opaque and not repaint the backdrop
+        # under it, leaving the previous page's pixels behind.
+        body.setAutoFillBackground(False)
         self.lay = QVBoxLayout(body)
         self.lay.setContentsMargins(28, 24, 28, 24)
         self.lay.setSpacing(18)
@@ -721,10 +725,14 @@ class SettingsWindow(QWidget):
                                  "photo y est. Recommandé.")
         self.out_folder = Choice("Dans un dossier de mon choix",
                                  "Tous les fichiers créés au même endroit.")
+        self.out_ask = Choice("Me demander à chaque fois",
+                              "Cerclic te demande le dossier avant de créer le fichier.")
         mode = self.s.get("output_mode")
-        (self.out_folder if mode == "folder" else self.out_beside).setChecked(True)
+        {"folder": self.out_folder, "ask": self.out_ask}.get(
+            mode, self.out_beside).setChecked(True)
         self.out_beside.picked.connect(lambda: self._set_output("beside"))
         self.out_folder.picked.connect(lambda: self._set_output("folder"))
+        self.out_ask.picked.connect(lambda: self._set_output("ask"))
         bl.addWidget(self.out_beside)
         bl.addWidget(self.out_folder)
         row = QHBoxLayout()
@@ -738,6 +746,7 @@ class SettingsWindow(QWidget):
         row.addWidget(self.pick_btn)
         row.addWidget(self.open_btn)
         bl.addLayout(row)
+        bl.addWidget(self.out_ask)
         g.add(box)
         page.add(group_block(g, notes=(
             "Leur nom : le nom d'origine, plus ce qui a changé, par exemple "
@@ -762,9 +771,10 @@ class SettingsWindow(QWidget):
 
     def _set_output(self, mode: str) -> None:
         if mode == "folder" and not self.s.get("output_folder"):
-            if not self._pick_folder():
-                self.out_beside.setChecked(True)
-                mode = "beside"
+            if not self._pick_folder():             # no folder chosen: as before
+                mode = self.s.get("output_mode")
+                {"folder": self.out_folder, "ask": self.out_ask}.get(
+                    mode, self.out_beside).setChecked(True)
         self._set("output_mode", mode)
         self._refresh_output()
 
@@ -878,8 +888,9 @@ class SettingsWindow(QWidget):
         texts.setSpacing(3)
         texts.addWidget(label("Cerclic", "title"))
         texts.addWidget(label(f"Version {__version__}", "desc"))
-        texts.addWidget(label("Rogner, signer, compresser, convertir… en un geste, "
-                              "sans ouvrir d'autre application.", "desc"))
+        texts.addWidget(label("Rogner, signer, compresser, convertir, mettre au format "
+                              "des réseaux sociaux… en un geste, sans ouvrir d'autre "
+                              "application.", "desc"))
         hl.addLayout(texts, 1)
         page.add(hero)
         g = Group()

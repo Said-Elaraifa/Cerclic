@@ -46,12 +46,24 @@ class Probe:
     duration: float = 0.0
     has_video: bool = False
     has_audio: bool = False
-    width: int = 0
+    width: int = 0              # upright (a phone video filmed standing: taller than wide)
     height: int = 0
+    rotated: bool = False       # stored sideways, turned upright when played
+    sar: float = 1.0            # pixel shape (1: square pixels, nearly always)
+    fps: float = 0.0
+
+    @property
+    def display_size(self) -> tuple[float, float]:
+        """Width and height as the video is seen (upright, square pixels)."""
+        if self.rotated:
+            return float(self.width), float(self.height) * self.sar
+        return float(self.width) * self.sar, float(self.height)
 
 
 _DUR = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 _VID = re.compile(r"Stream #\d+:\d+.*?: Video: .*?(\d{2,5})x(\d{2,5})")
+_SAR = re.compile(r"\bSAR (\d+):(\d+)")
+_FPS = re.compile(r"(\d+(?:\.\d+)?)(k?) fps")
 
 
 def _tie(proc) -> None:
@@ -85,16 +97,26 @@ def probe(src: str, measure: bool = True, should_stop=None) -> Probe:
         h, mi, s = m.groups()
         info.duration = int(h) * 3600 + int(mi) * 60 + float(s)
     info.has_audio = bool(re.search(r"Stream #\d+:\d+.*?: Audio:", text))
-    v = _VID.search(text)
+    # the first real picture stream (a song's cover art is not a video)
+    line = next((m.group(0) for m in re.finditer(r"Stream #\d+:\d+.*?: Video:[^\n]*", text)
+                 if "(attached pic)" not in m.group(0)), "")
+    v = _VID.search(line) if line else None
     if v:
         info.has_video = True
         info.width, info.height = int(v.group(1)), int(v.group(2))
+        sar = _SAR.search(line)
+        if sar and int(sar.group(1)) > 0 and int(sar.group(2)) > 0:
+            info.sar = int(sar.group(1)) / int(sar.group(2))
+        fps = _FPS.search(line)
+        if fps:
+            info.fps = float(fps.group(1)) * (1000 if fps.group(2) else 1)
         # phone videos filmed upright are stored sideways with a rotation flag
         rot = re.search(r"rotation of (-?\d+(?:\.\d+)?) degrees", text) or \
             re.search(r"\brotate\s*:\s*(-?\d+)", text)
         if rot and round(abs(float(rot.group(1)))) % 180 == 90:
             info.width, info.height = info.height, info.width
-    elif re.search(r"Stream #\d+:\d+.*?: Video:", text):
+            info.rotated = True
+    elif line:
         info.has_video = True
     if measure and info.duration <= 0 and (info.has_video or info.has_audio):
         info.duration = _measure_duration(src, should_stop)
@@ -204,6 +226,9 @@ def _need_video(info: Probe) -> None:
 
 
 EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+# Pixels made square (a few cameras store stretched pixels): nothing changes
+# for the usual video, whose pixels already are.
+SQUARE_PIXELS = "scale=iw*sar:ih,setsar=1"
 
 
 def compress_video(src: str, crf: int = 27, max_short_side: int = 1080, ctx=None) -> str:
@@ -439,8 +464,10 @@ def _capture(args: list[str], timeout: float = 20.0, should_stop=None) -> bytes:
 
 
 def frame_png(src: str, t: float, max_w: int, max_h: int, should_stop=None) -> bytes:
-    """One frame at `t` seconds, fitted in max_w x max_h, as PNG bytes."""
-    vf = (f"scale=w={int(max_w)}:h={int(max_h)}:force_original_aspect_ratio=decrease,"
+    """One frame at `t` seconds, fitted in max_w x max_h, as PNG bytes (with
+    square pixels, as the video is seen)."""
+    vf = (f"{SQUARE_PIXELS},"
+          f"scale=w={int(max_w)}:h={int(max_h)}:force_original_aspect_ratio=decrease,"
           "format=rgb24")
     return _capture(["-ss", _fmt_time(max(0.0, t)), "-i", src, "-frames:v", "1",
                      "-vf", vf, "-f", "image2pipe", "-c:v", "png", "-"],

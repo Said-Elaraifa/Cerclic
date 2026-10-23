@@ -22,8 +22,9 @@ DEFAULTS: dict = {
     "classic_menu_by_cerclic": False,  # we set it, so we may undo it on uninstall
     "jpg_quality": 90,
     "compress_quality": 70,
-    "output_mode": "beside",    # results: "beside" the original, or in "folder"
+    "output_mode": "beside",    # results: "beside" the original, in "folder", or "ask"
     "output_folder": "",        # that folder
+    "social_last": {},          # format and background last chosen: {"image": [...], "video": [...]}
     "welcome_shown": False,
 }
 # Keys from older versions (gesture, hold_ms...) are dropped on load.

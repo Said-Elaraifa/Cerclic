@@ -12,8 +12,8 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import (QEvent, QEventLoop, QObject, QPoint, Qt, QTimer, Signal,
-                            qInstallMessageHandler)
+from PySide6.QtCore import (QEvent, QEventLoop, QObject, QPoint, QRect, QSize, Qt, QTimer,
+                            Signal, qInstallMessageHandler)
 from PySide6.QtGui import QCursor
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
@@ -24,6 +24,7 @@ from .log import log, log_exception, log_path
 from .paths import clean_selection, fallback_folder, kind_of, natural_key
 from .settings import Settings
 from .system import FILES_APP, IS_MAC, IS_WINDOWS, MOD_KEY, OS_NAME, hotkey_supported, hotkeys
+from .win.foreground import bring_to_front
 
 # A right-click on many files starts one forwarder per file: paths arriving
 # less than MERGE_GAP s after the previous one join the wheel already open.
@@ -751,14 +752,16 @@ class CerclicApp(QObject):
                 opts["passwords"] = passwords
         first_pw = registry._pw(opts, files[0])
         for need in action.needs:
-            if need == "crop" and kind_of(files[0]) == "image":
+            if need in ("crop", "social") and len(files) == 1 and kind_of(files[0]) == "image":
                 from .actions.images import page_count
                 pages = page_count(files[0])
                 if pages > 1:                  # a scan: say so before any drawing
                     self.message(f"« {os.path.basename(files[0])} » a {pages} pages",
                                  "Rogner n'en garderait que la première. Utilise "
                                  "« En PDF » pour les garder toutes, puis Rogner sur "
-                                 "le PDF.")
+                                 "le PDF." if need == "crop" else
+                                 "Seule la première serait mise au format. Utilise "
+                                 "« En PDF » pour les garder toutes.")
                     return
             if need == "crop":
                 from .ui.crop_editor import CropEditor
@@ -799,6 +802,19 @@ class CerclicApp(QObject):
                 if res is None:
                     return
                 opts.update(res)
+            elif need == "social":
+                from .ui.social_editor import SocialEditor
+                kind = "video" if action.category == "video" else "image"
+                last = dict(self.settings.get("social_last") or {})
+                was = last.get(kind) if isinstance(last.get(kind), list) else []
+                res = yield self._ask_editor(
+                    lambda: SocialEditor(files, *(was + [None, None])[:2]), pos)
+                if res is None:
+                    return
+                last[kind] = [res["social"], res["social_mode"]]   # proposed next time
+                self.settings.set("social_last", last)
+                self.settings.save()
+                opts.update(res)
             elif need == "text":
                 txt = yield self._ask_text("Texte du filigrane",
                                            "Il sera écrit en diagonale sur chaque page.",
@@ -814,7 +830,45 @@ class CerclicApp(QObject):
                 if pw is None:
                     return
                 opts["new_password"] = pw
+        if self.settings.get("output_mode") == "ask":
+            folder = yield self._ask_folder(files[0], pos)
+            if not folder:
+                return                      # cancelled: nothing is created
+            opts["_out_dir"] = folder
         self._run_job(action, files, opts, pos, attempts=0)
+
+    def _ask_folder(self, src: str, pos=None):
+        """« Me demander à chaque fois »: where the result goes, the original's
+        folder proposed first, in front. The wheel has just closed: on Windows
+        the question hangs on a tiny invisible window brought to the front
+        first (else it could stay behind the Explorer); on macOS, Cerclic
+        itself comes forward."""
+        def ask(cb):
+            def run():
+                from PySide6.QtWidgets import QFileDialog
+                anchor = None
+                if IS_WINDOWS:
+                    anchor = QWidget(None, Qt.Tool | Qt.FramelessWindowHint
+                                     | Qt.WindowStaysOnTopHint | Qt.NoDropShadowWindowHint)
+                    anchor.setAttribute(Qt.WA_TranslucentBackground)
+                    anchor.setGeometry(QRect(pos if pos is not None else QCursor.pos(),
+                                             QSize(1, 1)))
+                    anchor.show()
+                    bring_to_front(int(anchor.winId()))
+                    self._live.add(anchor)
+                else:
+                    bring_to_front(0)
+                try:
+                    folder = QFileDialog.getExistingDirectory(
+                        anchor, "Où enregistrer le résultat ?", os.path.dirname(src))
+                finally:
+                    if anchor is not None:
+                        self._live.discard(anchor)
+                        anchor.close()
+                        anchor.deleteLater()
+                cb(os.path.normpath(folder) if folder else None)
+            QTimer.singleShot(0, run)
+        return ask
 
     def _ask_text(self, title, subtitle, pos, password=False, default="",
                   ok_label="OK"):

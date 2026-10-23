@@ -44,9 +44,11 @@ def _click_slice(qtbot, w, label):
 def test_wheel_single_category_shows_actions(qtbot, jpg_photo):
     w = _wheel(qtbot, [jpg_photo])
     labels = [s.label for s in w._slices]
-    assert labels == ["Rogner", "Pivoter", "Redimensionner", "Compresser", "Convertir",
-                      "Copier", "En PDF", "Anonymiser"]
+    assert labels == ["Rogner", "Réseaux", "Pivoter", "Redimensionner", "Compresser",
+                      "Convertir", "En PDF", "Plus"]
     assert all(s.desc for s in w._slices)              # every action says what it does
+    _click_slice(qtbot, w, "Plus")
+    assert [s.label for s in w._slices] == ["Copier", "Anonymiser"]
 
 
 def test_wheel_slices_are_where_they_are_drawn(qtbot, jpg_photo):

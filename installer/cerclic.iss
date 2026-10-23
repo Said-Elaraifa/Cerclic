@@ -3,7 +3,7 @@
 ; The version is passed with /DMyAppVersion=x.y.z.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.4.0"
+  #define MyAppVersion "0.5.0"
 #endif
 
 #define MyAppName "Cerclic"
@@ -18,7 +18,8 @@ VersionInfoVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
-DisableDirPage=yes
+; the user chooses where Cerclic goes (an update proposes the current folder)
+DisableDirPage=no
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
 PrivilegesRequired=lowest
@@ -108,6 +109,100 @@ begin
   Result := True;
   if LoadStringFromFile(ExpandConstant('{userappdata}\Cerclic\settings.json'), Json) then
     Result := Pos('"' + Key + '": false', Json) = 0;
+end;
+
+{ Cerclic installs without administrator rights: a folder only an
+  administrator may write to (Program Files...) cannot take it. Said on the
+  folder page, before anything is copied. }
+function DirWritable(const Dir: String): Boolean;
+var
+  Probe, Existing, D: String;
+begin
+  Result := False;
+  { the nearest folder that already exists: the ones made for the test go again }
+  Existing := RemoveBackslashUnlessRoot(Dir);
+  while (not DirExists(Existing)) and (ExtractFileDir(Existing) <> Existing) do
+    Existing := ExtractFileDir(Existing);
+  if not ForceDirectories(Dir) then
+    exit;
+  Probe := AddBackslash(Dir) + 'cerclic-essai-ecriture.tmp';
+  if SaveStringToFile(Probe, 'x', False) then
+  begin
+    DeleteFile(Probe);
+    Result := True;
+  end;
+  D := RemoveBackslashUnlessRoot(Dir);
+  while (Length(D) > Length(Existing)) and RemoveDir(D) do
+    D := ExtractFileDir(D);
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (CurPageID = wpSelectDir) and not DirWritable(WizardDirValue()) then
+  begin
+    SuppressibleMsgBox('Cerclic ne peut pas s''installer dans ce dossier : Windows le protège ' +
+           '(il faudrait des droits d''administrateur) ou il n''est pas accessible.' + #13#10 +
+           'Choisis un dossier à toi, par exemple dans Documents, ou garde celui proposé.',
+           mbError, MB_OK, IDOK);
+    Result := False;
+  end;
+end;
+
+{ An update installed into another folder than the previous one moves
+  Cerclic: once the new copy is in place, Cerclic's own files go from the old
+  folder (only those: anything else the user kept there stays), then the
+  folder itself if nothing is left in it. The settings, in the user's
+  profile, stay. A marker written in the new folder tells whether the old
+  path is in fact the same folder (a mapped drive, a link...). }
+var
+  OldDir: String;
+
+function SameDir(const A, B: String): Boolean;
+begin
+  Result := CompareText(RemoveBackslashUnlessRoot(A), RemoveBackslashUnlessRoot(B)) = 0;
+end;
+
+function Inside(const Child, Parent: String): Boolean;
+begin
+  Result := Pos(Lowercase(AddBackslash(Parent)), Lowercase(AddBackslash(Child))) = 1;
+end;
+
+procedure RemoveOldCopy(const Dir: String);
+var
+  D: String;
+begin
+  D := AddBackslash(Dir);
+  DelTree(D + '_internal', True, True, True);
+  DeleteFile(D + '{#MyAppExeName}');
+  DeleteFile(D + 'CerclicOpen.exe');
+  DeleteFile(D + 'LICENCES.txt');
+  DeleteFile(D + 'Lancer Cerclic.bat');
+  DelTree(D + 'unins*.*', False, True, False);
+  RemoveDir(Dir);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  NewDir, Marker: String;
+begin
+  if CurStep = ssInstall then
+    OldDir := WizardForm.PrevAppDir;
+  if CurStep = ssPostInstall then
+  begin
+    NewDir := ExpandConstant('{app}');
+    if (OldDir <> '') and not SameDir(OldDir, NewDir) and not Inside(NewDir, OldDir)
+       and FileExists(AddBackslash(OldDir) + '{#MyAppExeName}') then
+    begin
+      Marker := 'cerclic-nouveau-dossier.tmp';
+      if SaveStringToFile(AddBackslash(NewDir) + Marker, 'x', False) then
+      begin
+        if not FileExists(AddBackslash(OldDir) + Marker) then
+          RemoveOldCopy(OldDir);
+        DeleteFile(AddBackslash(NewDir) + Marker);
+      end;
+    end;
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;

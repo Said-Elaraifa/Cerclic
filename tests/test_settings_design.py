@@ -67,6 +67,11 @@ def test_settings_pages_and_output_choice(qtbot, monkeypatch, tmp_path):
     assert str(target) in w.folder_label.text()
     w.out_beside.click()
     assert Settings.load().get("output_mode") == "beside"
+    w.out_ask.click()                                # « Me demander à chaque fois »
+    assert Settings.load().get("output_mode") == "ask"
+    again = sw.SettingsWindow(Settings.load())
+    qtbot.addWidget(again)
+    assert again.out_ask.isChecked()
 
 
 def test_switch_is_a_checkbox(qtbot):
@@ -152,3 +157,52 @@ def test_settings_help_is_plain_text_and_buttons_honest(qtbot, monkeypatch, tmp_
     texts = " ".join(lbl.text() for lbl in w.findChildren(sw.QLabel))
     assert "photo (compressé).jpg" in texts and "Bon à savoir" not in texts
     assert "—" not in texts and "–" not in texts
+
+
+def test_switching_pages_leaves_no_trace_of_the_previous_one(qtbot):
+    """What is on screen after going from page to page is exactly the page shown
+    (a see-through page taken for opaque left the previous one's pixels)."""
+    from cerclic.settings import Settings
+    from cerclic.ui.settings_window import SettingsWindow
+    w = SettingsWindow(Settings(), windows_11=True, welcome=True)
+    qtbot.addWidget(w)
+    w.resize(900, 640)
+    w.show()
+    qtbot.wait(100)
+    for key in ("signature", "general", "menu", "quality"):
+        w.show_page(key)
+        qtbot.wait(60)
+    shown = w.screen().grabWindow(w.winId()).toImage()
+    fresh = w.grab().toImage()
+    differing = sum(1 for y in range(0, shown.height(), 6) for x in range(0, shown.width(), 6)
+                    if shown.pixel(x, y) != fresh.pixel(x, y))
+    assert differing == 0
+
+
+def test_ask_each_time_where_results_go(qtbot, monkeypatch, tmp_path, jpg_photo):
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    from cerclic.app import CerclicApp
+    a = CerclicApp(QApplication.instance())
+    try:
+        a.settings.set("output_mode", "ask")
+        target = tmp_path / "Pour Instagram"
+        target.mkdir()
+        asked = []
+        monkeypatch.setattr(QFileDialog, "getExistingDirectory",
+                            staticmethod(lambda *args, **kw: asked.append(args) or str(target)))
+        a.start_action("img_compress", [jpg_photo], {}, QPoint(300, 300))
+        qtbot.waitUntil(lambda: any(f.endswith(".jpg") for f in os.listdir(target)),
+                        timeout=8000)
+        assert asked and asked[0][2] == os.path.dirname(jpg_photo)   # the original's folder first
+        # cancelled: nothing is created anywhere
+        monkeypatch.setattr(QFileDialog, "getExistingDirectory",
+                            staticmethod(lambda *args, **kw: ""))
+        before = set(os.listdir(os.path.dirname(jpg_photo)))
+        a.start_action("img_rotate", [jpg_photo], {"degrees": 90}, QPoint(300, 300))
+        qtbot.wait(600)
+        assert set(os.listdir(os.path.dirname(jpg_photo))) == before
+        assert len(os.listdir(target)) == 1
+    finally:
+        a.cards.close_all()
+        a.server.server.close()
+        a.tray.hide()

@@ -19,6 +19,7 @@ cerclic/
   settings.py  log.py     réglages JSON et journal (%APPDATA%\Cerclic, ~/Library/Application Support/Cerclic)
   actions/                traitements purs, testés partout
     images.py  pdf.py  video.py  registry.py  common.py
+    social.py             formats des réseaux sociaux (tailles exactes, cadrage, fonds)
   win/                    Windows uniquement
     shell.py              entrée du clic droit, démarrage avec Windows, menu complet de Windows 11
     hotkey.py             raccourci clavier choisi par l'utilisateur (RegisterHotKey) et ses règles
@@ -38,6 +39,7 @@ cerclic/
     signature.py          dessin de la signature et placement sur la page
     pages_editor.py       organisation des pages d'un PDF
     trim_editor.py        découpe d'une vidéo ou d'un son
+    social_editor.py      « Réseaux » : aperçu du résultat, format, fond, cadrage par fichier
     cards.py              progression puis résultat, en bas à droite
     settings_window.py    la fenêtre de Cerclic : raccourci (enregistreur), clic droit, signature...
     glass.py              verre givré : fond pastel, cartes, interrupteurs, barre latérale
@@ -77,7 +79,7 @@ scripts/build_mac.sh      construit, vérifie et installe Cerclic.app sur un Mac
 Cerclic n'écoute ni la souris ni le clavier en dehors de cela. La roue se
 ferme quand on clique ailleurs (perte du premier plan), sur Échap, ou si le
 pointeur s'éloigne alors que Windows a refusé de la mettre au premier plan.
-Les popups (rogner, signer, pages, découpe) s'ouvrent au même endroit, à la
+Les popups (rogner, signer, pages, découpe, réseaux) s'ouvrent au même endroit, à la
 taille de ce qu'ils montrent, et restent dans l'écran ; une fois qu'on a
 travaillé dedans, un clic ailleurs ne les ferme plus (Échap ou Annuler).
 
@@ -121,7 +123,22 @@ Windows ouverts en même temps ont chacun leur Cerclic.
   la source (pixels de l'image redressée, points de la page PDF visible).
 - **Une action = métadonnées + fonction** (`registry.ACTIONS`) : libellé,
   description courte (affichée au centre de la roue), catégorie, ce qu'il
-  faut demander (`needs`), variantes (`choices`).
+  faut demander (`needs`), variantes (`choices`). La roue a 8 places : quand
+  les actions principales ne tiennent pas toutes à côté de « Plus », les
+  dernières passent sous « Plus » (`radial.ring_split`), aucune ne disparaît.
+- **Où vont les résultats** : à côté de l'original, dans un dossier choisi, ou
+  « Me demander à chaque fois » (la question vient juste avant le traitement,
+  dans le dossier de l'original). Un dossier où l'on ne peut pas écrire
+  renvoie vers Téléchargements.
+- **Réseaux sociaux** (`actions/social.py`) : un format est une forme et une
+  taille exacte (1080 × 1350...). « Remplir » découpe la partie choisie
+  (centre et zoom relatifs, `place_box`) puis la met à la taille ; les fonds
+  flou, blanc ou noir gardent toute l'image. Le fond flou est l'image réduite
+  au dixième, floutée puis agrandie et assombrie. Les images sortent en JPG
+  sRGB sans EXIF (pas de position GPS) ; les vidéos passent par un graphe de
+  filtres ffmpeg (pixels rendus carrés, vidéos de téléphone redressées,
+  60 images/s au plus) puis H.264 et AAC. Le popup montre le résultat avec le
+  même calcul de cadrage.
 - **Programmes lancés pour l'utilisateur** (Explorateur redémarré, application
   qui ouvre un résultat) : sans les variables que l'empaquetage ajoute pour
   Cerclic (plugins Qt, son dossier en tête du PATH), et Cerclic lui-même
@@ -148,8 +165,9 @@ bulles, les éditeurs et le parcours complet demande, roue, action, carte,
 hors écran ; le protocole de transmission ; les parties macOS (règles du
 raccourci, fichiers de l'action rapide et de la connexion, fichiers envoyés
 par macOS, réglages tels qu'ils s'affichent sur Mac). Le build Windows est en
-plus essayé sous Wine : roue, rognage, signature, fusion, filigrane,
-installation, et `--selftest`.
+plus essayé sous Wine : roue, rognage, signature, fusion, filigrane, formats
+réseaux, installation (page du dossier comprise), et `--selftest` (qui fait
+aussi une image et une vidéo au format réseaux, fond flou).
 
 ## Construire
 
