@@ -7,6 +7,10 @@ d'autre application.
 
 ![Aperçu de la roue](docs/preview_image.png)
 
+Cerclic parle 10 langues : français, anglais, espagnol, allemand, italien,
+portugais, arabe, turc, chinois simplifié et japonais. Il prend la langue de
+l'ordinateur ; Général, « Langue », en choisit une autre, aussitôt.
+
 ## Ouvrir la roue
 
 - **Ton raccourci clavier** sur les fichiers sélectionnés dans l'Explorateur,

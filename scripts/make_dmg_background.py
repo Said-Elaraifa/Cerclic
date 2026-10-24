@@ -19,18 +19,27 @@ from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QGuiApplication, QImage
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "assets", "dmg")
-W, H = 640, 440
+W, H = 640, 520
 ICON_Y = 180
 LEFT_X, RIGHT_X = 160, 480
 INK, SOFT, BLUE, BORDER = "#1B2232", "#3A4457", "#2E7CF6", "#DCE2EC"
 
-TITLE = "Glisse Cerclic dans Applications"
-CARD_TITLE = "Première ouverture"
-STEPS = [  # (number, line); a line without a number continues the step above
-    ("1.", "Ouvre le dossier Applications et double-clique sur Cerclic."),
-    ("2.", "Si le Mac le bloque : Réglages Système, Confidentialité et sécurité,"),
-    ("", "tout en bas, « Ouvrir quand même »."),
-    ("3.", "Clique sur une photo, puis appuie sur Maj + Cmd + Espace."),
+# English for everyone, French below: one disk image for every Mac.
+TITLE = "Drag Cerclic to Applications"
+SUBTITLE = "Glisse Cerclic dans Applications"
+CARDS = [  # (title, steps); a step without a number continues the one above
+    ("First launch", [
+        ("1.", "Open the Applications folder and double-click Cerclic."),
+        ("2.", "If your Mac blocks it: System Settings, Privacy & Security,"),
+        ("", "at the bottom, \u201cOpen Anyway\u201d."),
+        ("3.", "Click a photo, then press Shift + Cmd + Space."),
+    ]),
+    ("Première ouverture", [
+        ("1.", "Ouvre le dossier Applications et double-clique sur Cerclic."),
+        ("2.", "Si le Mac le bloque : Réglages Système, Confidentialité et sécurité,"),
+        ("", "tout en bas, « Ouvrir quand même »."),
+        ("3.", "Clique sur une photo, puis appuie sur Maj + Cmd + Espace."),
+    ]),
 ]
 
 
@@ -55,7 +64,10 @@ def draw(scale: int) -> QImage:
     # title
     p.setPen(QColor(INK))
     p.setFont(font(22, QFont.DemiBold))
-    p.drawText(QRectF(0, 30, W, 40), Qt.AlignHCenter | Qt.AlignVCenter, TITLE)
+    p.drawText(QRectF(0, 22, W, 34), Qt.AlignHCenter | Qt.AlignVCenter, TITLE)
+    p.setPen(QColor(SOFT))
+    p.setFont(font(15))
+    p.drawText(QRectF(0, 54, W, 24), Qt.AlignHCenter | Qt.AlignVCenter, SUBTITLE)
 
     # arrow from Cerclic to Applications
     x0, x1, y = LEFT_X + 88, RIGHT_X - 92, ICON_Y
@@ -70,24 +82,25 @@ def draw(scale: int) -> QImage:
     p.setBrush(QColor(BLUE))
     p.drawPath(head)
 
-    # first opening, in a card
-    card = QRectF(24, 282, W - 48, 112)
-    p.setPen(QPen(QColor(BORDER), 1))
-    p.setBrush(QColor("#FFFFFF"))
-    p.drawRoundedRect(card, 14, 14)
-    p.setPen(QColor(INK))
-    p.setFont(font(14, QFont.DemiBold))
-    p.drawText(QPointF(card.left() + 20, card.top() + 26), CARD_TITLE)
-    p.setPen(QColor(SOFT))
-    f = font(13)
-    p.setFont(f)
-    fm = QFontMetricsF(f)
-    for i, (number, line) in enumerate(STEPS):
-        assert fm.horizontalAdvance(line) < card.width() - 60, line
-        y = card.top() + 48 + i * 18
-        if number:
-            p.drawText(QPointF(card.left() + 20, y), number)
-        p.drawText(QPointF(card.left() + 42, y), line)
+    # first opening, in a card per language
+    for k, (title, steps) in enumerate(CARDS):
+        card = QRectF(24, 272 + k * 120, W - 48, 110)
+        p.setPen(QPen(QColor(BORDER), 1))
+        p.setBrush(QColor("#FFFFFF"))
+        p.drawRoundedRect(card, 14, 14)
+        p.setPen(QColor(INK))
+        p.setFont(font(14, QFont.DemiBold))
+        p.drawText(QPointF(card.left() + 20, card.top() + 25), title)
+        p.setPen(QColor(SOFT))
+        f = font(13)
+        p.setFont(f)
+        fm = QFontMetricsF(f)
+        for i, (number, line) in enumerate(steps):
+            assert fm.horizontalAdvance(line) < card.width() - 60, line
+            y = card.top() + 46 + i * 18
+            if number:
+                p.drawText(QPointF(card.left() + 20, y), number)
+            p.drawText(QPointF(card.left() + 42, y), line)
     p.end()
     return img
 

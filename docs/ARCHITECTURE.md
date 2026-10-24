@@ -19,6 +19,8 @@ cerclic/
   paths.py                noms de sortie réservés atomiquement, jamais d'écrasement
   settings.py  log.py     réglages JSON et journal (%APPDATA%\Cerclic, ~/Library/Application Support/Cerclic)
   sizes.py                tailles en mots (« 612 Ko »), comme l'Explorateur ou le Finder
+  i18n.py                 langues : tr(), trn(), trc(), N_(), langue de l'ordinateur (docs/I18N.md)
+  locales/                une traduction par langue, clé = texte français du code
   actions/                traitements purs, testés partout
     images.py  pdf.py  video.py  registry.py  common.py
     social.py             formats des réseaux sociaux (tailles exactes, cadrage, fonds)
@@ -49,6 +51,7 @@ cerclic/
     glass.py              verre givré : fond pastel, cartes, interrupteurs, barre latérale
     theme.py  logo.py  icons.py  trayicon.py
 installer/cerclic.iss     installateur Inno Setup (par utilisateur, sans droits administrateur)
+installer/mac/            <langue>.lproj/InfoPlist.strings : textes de Cerclic.app dans chaque langue
 cerclic_mac.spec          Cerclic.app (application de la barre des menus, LSUIElement)
 scripts/build_mac.sh      construit, vérifie et installe Cerclic.app sur un Mac, fait le .dmg
 scripts/store/            paquet MSIX du Microsoft Store, sans le SDK de Windows :

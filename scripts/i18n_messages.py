@@ -4,6 +4,10 @@ and N_("...") of cerclic/, found in the code itself (ast), with where they are.
     python scripts/i18n_messages.py                 all the texts, as JSON
     python scripts/i18n_messages.py --missing en    those the English catalogue lacks
     python scripts/i18n_messages.py --check         every catalogue complete and right
+    python scripts/i18n_messages.py --check de      this catalogue only
+    python scripts/i18n_messages.py --update de     rewrites cerclic/locales/de.py with every
+                                                    text of the code, translations kept, new
+                                                    ones empty ("" to fill), unused ones dropped
 """
 from __future__ import annotations
 
@@ -118,6 +122,38 @@ def problems(code: str, msgs: dict | None = None) -> list[str]:
     return out
 
 
+def update(code: str, msgs: dict) -> str:
+    """Writes the catalogue of this language with every text of the code, in
+    code order, each under a comment saying where it is used."""
+    sys.path.insert(0, ROOT)
+    from cerclic.i18n import LANGS, NPLURALS
+    cat = catalog(code)
+    n = NPLURALS.get(code, 2)
+    lines = [f'"""Cerclic, {LANGS[code]}. Keys: the French text of the code (docs/I18N.md).',
+             'Kept up to date by scripts/i18n_messages.py --update."""', "",
+             "T: dict = {"]
+    for key, m in msgs.items():
+        where = ", ".join(m["where"][:3]) + (" ..." if len(m["where"]) > 3 else "")
+        if CTX_SEP in key:
+            where = "contexte : " + key.split(CTX_SEP)[0] + " | " + where
+        if m["plural"]:
+            where = "pluriel : " + repr(m["plural"]) + " | " + where
+        lines.append(f"    # {where}")
+        value = cat.get(key)
+        if m["plural"]:
+            if not isinstance(value, (list, tuple)):
+                value = [value] * n if isinstance(value, str) and value else [""] * n
+            value = (list(value) + [""] * n)[:n]
+        elif not isinstance(value, str):
+            value = ""
+        lines.append(f"    {key!r}: {value!r},")
+    lines.append("}")
+    path = os.path.join(CODE, "locales", f"{code}.py")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
 def main(argv: list[str]) -> int:
     msgs = messages()
     if "--missing" in argv:
@@ -126,10 +162,15 @@ def main(argv: list[str]) -> int:
         print(json.dumps({k: v for k, v in msgs.items() if k not in cat},
                          ensure_ascii=False, indent=1))
         return 0
+    if "--update" in argv:
+        update(argv[argv.index("--update") + 1], msgs)
+        return 0
     if "--check" in argv:
         sys.path.insert(0, ROOT)
         from cerclic.i18n import LANGS, SOURCE
-        bad = [p for code in LANGS if code != SOURCE for p in problems(code, msgs)]
+        i = argv.index("--check")
+        codes = argv[i + 1:i + 2] or [c for c in LANGS if c != SOURCE]
+        bad = [p for code in codes for p in problems(code, msgs)]
         print("\n".join(bad) or f"{len(msgs)} textes, toutes les langues complètes")
         return 1 if bad else 0
     print(json.dumps(msgs, ensure_ascii=False, indent=1))
