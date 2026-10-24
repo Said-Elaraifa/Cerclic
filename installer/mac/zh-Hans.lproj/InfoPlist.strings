@@ -1,0 +1,14 @@
+/* Cerclic: the texts of Info.plist (cerclic_mac.spec) in this language. */
+"NSAppleEventsUsageDescription" = "当你使用 Cerclic 的键盘快捷键时，Cerclic 会读取在“访达”中选中的文件。";
+"NSHumanReadableCopyright" = "Said El Araifa，MIT 许可证";
+"Fichier pour Cerclic" = "Cerclic 文件";
+"Vidéo Matroska" = "Matroska 视频";
+"Vidéo WebM" = "WebM 视频";
+"Vidéo Flash" = "Flash 视频";
+"Vidéo WMV" = "WMV 视频";
+"Son Ogg" = "Ogg 音频";
+"Son Opus" = "Opus 音频";
+"Son FLAC" = "FLAC 音频";
+"Son WMA" = "WMA 音频";
+"Son AMR" = "AMR 音频";
+"Image AVIF" = "AVIF 图像";

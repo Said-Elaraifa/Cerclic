@@ -22,6 +22,7 @@ import sys
 import threading
 from typing import Callable
 
+from ..i18n import N_, tr, trc
 from ..log import log
 
 CMD, SHIFT, OPTION, CTRL = 0x100, 0x200, 0x800, 0x1000
@@ -55,11 +56,24 @@ _DIGITS = {0x1D: "0", 0x12: "1", 0x13: "2", 0x14: "3", 0x15: "4", 0x17: "5", 0x1
            0x1A: "7", 0x1C: "8", 0x19: "9"}
 _PUNCTUATION = {0x18: "=", 0x1B: "-", 0x1E: "]", 0x21: "[", 0x27: "'", 0x29: ";",
                 0x2A: "\\", 0x2B: ",", 0x2C: "/", 0x2F: ".", 0x32: "`", 0x0A: "§"}
-_NAMES = {0x31: "Espace", 0x24: "Retour", 0x4C: "Entrée", 0x30: "Tab", 0x33: "⌫",
-          0x75: "Suppr", 0x35: "Échap", 0x73: "Début", 0x77: "Fin", 0x74: "Page préc.",
-          0x79: "Page suiv.", 0x7B: "←", 0x7C: "→", 0x7D: "↓", 0x7E: "↑", 0x72: "Aide",
-          0x47: "Pavé ⌧", 0x41: "Pavé .", 0x43: "Pavé *", 0x45: "Pavé +", 0x4B: "Pavé /",
-          0x4E: "Pavé -", 0x51: "Pavé ="}
+_SYMBOLS = {0x33: "⌫", 0x7B: "←", 0x7C: "→", 0x7D: "↓", 0x7E: "↑"}
+_KEYPAD_SIGNS = {0x47: "⌧", 0x41: ".", 0x43: "*", 0x45: "+", 0x4B: "/", 0x4E: "-", 0x51: "="}
+
+
+def _names() -> dict[int, str]:
+    """The keys that type no character, named as on the keyboards of the
+    language in use (made at each call: the language can change)."""
+    return {
+        0x31: trc("touche Mac", "Espace"),
+        0x24: trc("touche Mac", "Retour"),                    # Return
+        0x4C: trc("touche Mac", "Entrée"), 0x30: trc("touche Mac", "Tab"),
+        0x75: trc("touche Mac", "Suppr"), 0x35: trc("touche Mac", "Échap"),
+        0x73: trc("touche Mac", "Début"), 0x77: trc("touche Mac", "Fin"),
+        0x74: trc("touche Mac", "Page préc."), 0x79: trc("touche Mac", "Page suiv."),
+        0x72: trc("touche Mac", "Aide"),
+    }
+
+
 _KEYPAD = {0x52: 0, 0x53: 1, 0x54: 2, 0x55: 3, 0x56: 4, 0x57: 5, 0x58: 6, 0x59: 7,
            0x5B: 8, 0x5C: 9}
 _F_KEYS = {0x7A: 1, 0x78: 2, 0x63: 3, 0x76: 4, 0x60: 5, 0x61: 6, 0x62: 7, 0x64: 8,
@@ -124,65 +138,79 @@ def _layout_char(code: int) -> str:
         return ""
 
 
+def _typed(code: int) -> str:
+    """The letter or sign of a letter or punctuation key (not translated)."""
+    return _layout_char(code) or _LETTERS.get(code) or _PUNCTUATION[code]
+
+
 def key_name(vk: int) -> str:
+    """The name of a key, in the language in use. Never " + " in it: the
+    settings window splits label() on it (tests/test_i18n_system.py checks
+    the catalogues)."""
     code = keycode_of(vk)
     if code < 0:
         return "…"
-    if code in _NAMES:
-        return _NAMES[code]
+    if code in _SYMBOLS:
+        return _SYMBOLS[code]
+    if code in _KEYPAD_SIGNS:
+        return trc("touche Mac", "Pavé {key}", key=_KEYPAD_SIGNS[code])
+    names = _names()
+    if code in names:
+        return names[code]
     if code in _F_KEYS:
         return f"F{_F_KEYS[code]}"
     if code in _KEYPAD:
-        return f"Pavé {_KEYPAD[code]}"
+        return trc("touche Mac", "Pavé {key}", key=str(_KEYPAD[code]))
     if code in _DIGITS:                    # the digit printed on the key (AZERTY too)
         return _DIGITS[code]
     if code in _LETTERS or code in _PUNCTUATION:
-        return _layout_char(code) or _LETTERS.get(code) or _PUNCTUATION[code]
-    return f"Touche {code}"
+        return _typed(code)
+    return trc("touche Mac", "Touche {code}", code=code)
 
 
 def label(mods: int, vk: int) -> str:
     """'Maj + Cmd + Espace', 'Ctrl + Option + C' (in the order Apple writes them:
-    Control, Option, Shift, Command)."""
+    Control, Option, Shift, Command), in the language in use."""
     parts = []
     if mods & CTRL:
-        parts.append("Ctrl")
+        parts.append(trc("touche Mac", "Ctrl"))
     if mods & OPTION:
-        parts.append("Option")
+        parts.append(trc("touche Mac", "Option"))
     if mods & SHIFT:
-        parts.append("Maj")
+        parts.append(trc("touche Mac", "Maj"))
     if mods & CMD:
-        parts.append("Cmd")
+        parts.append(trc("touche Mac", "Cmd"))
     parts.append(key_name(vk))
     return " + ".join(parts)
 
 
 # ----- combinations to avoid -----------------------------------------------------------
 
+# N_(): translated when shown (check)
 _SYSTEM = {
-    (CMD, 0x31): "Cmd + Espace ouvre Spotlight.",
-    (CMD | OPTION, 0x31): "Option + Cmd + Espace ouvre la recherche du Finder.",
-    (CTRL, 0x31): "Ctrl + Espace change la langue du clavier.",
-    (CTRL | OPTION, 0x31): "Ctrl + Option + Espace change la langue du clavier.",
-    (CTRL | CMD, 0x31): "Ctrl + Cmd + Espace ouvre les emojis.",
-    (CMD, 0x30): "Cmd + Tab passe d'une application à l'autre.",
-    (CMD | SHIFT, 0x30): "Maj + Cmd + Tab passe d'une application à l'autre.",
-    (CMD | OPTION, 0x35): "Option + Cmd + Échap force une application à quitter.",
-    (CMD | SHIFT, 0x14): "Maj + Cmd + 3 fait une capture d'écran.",
-    (CMD | SHIFT, 0x15): "Maj + Cmd + 4 fait une capture d'écran.",
-    (CMD | SHIFT, 0x17): "Maj + Cmd + 5 ouvre l'outil de capture d'écran.",
-    (CMD | SHIFT, 0x16): "Maj + Cmd + 6 fait une capture de la Touch Bar.",
+    (CMD, 0x31): N_("Cmd + Espace ouvre Spotlight."),
+    (CMD | OPTION, 0x31): N_("Option + Cmd + Espace ouvre la recherche du Finder."),
+    (CTRL, 0x31): N_("Ctrl + Espace change la langue du clavier."),
+    (CTRL | OPTION, 0x31): N_("Ctrl + Option + Espace change la langue du clavier."),
+    (CTRL | CMD, 0x31): N_("Ctrl + Cmd + Espace ouvre les emojis."),
+    (CMD, 0x30): N_("Cmd + Tab passe d'une application à l'autre."),
+    (CMD | SHIFT, 0x30): N_("Maj + Cmd + Tab passe d'une application à l'autre."),
+    (CMD | OPTION, 0x35): N_("Option + Cmd + Échap force une application à quitter."),
+    (CMD | SHIFT, 0x14): N_("Maj + Cmd + 3 fait une capture d'écran."),
+    (CMD | SHIFT, 0x15): N_("Maj + Cmd + 4 fait une capture d'écran."),
+    (CMD | SHIFT, 0x17): N_("Maj + Cmd + 5 ouvre l'outil de capture d'écran."),
+    (CMD | SHIFT, 0x16): N_("Maj + Cmd + 6 fait une capture de la Touch Bar."),
 }
 _BY_LETTER = {
-    (CTRL | CMD, "Q"): "Ctrl + Cmd + Q verrouille l'écran.",
-    (CMD | SHIFT, "Q"): "Maj + Cmd + Q ferme la session.",
-    (CTRL | CMD, "F"): "Ctrl + Cmd + F passe en plein écran.",
-    (CMD | OPTION, "D"): "Option + Cmd + D masque le Dock.",
-    (CMD | OPTION, "C"): "Option + Cmd + C copie le chemin d'un fichier dans le Finder.",
-    (CMD | OPTION, "H"): "Option + Cmd + H masque les autres applications.",
-    (CMD | OPTION, "M"): "Option + Cmd + M réduit toutes les fenêtres.",
-    (CMD | OPTION, "W"): "Option + Cmd + W ferme toutes les fenêtres.",
-    (CMD | OPTION, "V"): "Option + Cmd + V déplace un fichier copié dans le Finder.",
+    (CTRL | CMD, "Q"): N_("Ctrl + Cmd + Q verrouille l'écran."),
+    (CMD | SHIFT, "Q"): N_("Maj + Cmd + Q ferme la session."),
+    (CTRL | CMD, "F"): N_("Ctrl + Cmd + F passe en plein écran."),
+    (CMD | OPTION, "D"): N_("Option + Cmd + D masque le Dock."),
+    (CMD | OPTION, "C"): N_("Option + Cmd + C copie le chemin d'un fichier dans le Finder."),
+    (CMD | OPTION, "H"): N_("Option + Cmd + H masque les autres applications."),
+    (CMD | OPTION, "M"): N_("Option + Cmd + M réduit toutes les fenêtres."),
+    (CMD | OPTION, "W"): N_("Option + Cmd + W ferme toutes les fenêtres."),
+    (CMD | OPTION, "V"): N_("Option + Cmd + V déplace un fichier copié dans le Finder."),
 }
 _FINDER_SHIFT = set("ACDFGHIKLNOPRTU")      # Maj + Cmd + these: places and views
 
@@ -240,33 +268,35 @@ def _system_shortcuts() -> set[tuple[int, int]]:
 
 
 def check(mods: int, vk: int) -> str | None:
-    """Why this combination should not be used, or None if it is fine."""
+    """Why this combination should not be used (in the language in use), or
+    None if it is fine."""
     mods &= CMD | SHIFT | OPTION | CTRL
     code = keycode_of(vk)
     if code < 0 or code in _MODIFIER_CODES:
-        return "Ajoute une touche après Cmd, Ctrl, Option ou Maj."
+        return tr("Ajoute une touche après Cmd, Ctrl, Option ou Maj.")
     if (mods, code) in _SYSTEM:
-        return _SYSTEM[(mods, code)]
+        return tr(_SYSTEM[(mods, code)])
     if (mods, code) in _system_shortcuts():
-        return (f"{label(mods, vk)} est déjà un raccourci de macOS (Réglages Système, "
-                "Clavier, Raccourcis clavier). Choisis-en un autre.")
-    name = key_name(vk)
-    if (mods, name) in _BY_LETTER:
-        return _BY_LETTER[(mods, name)]
-    if mods == CMD | SHIFT and name in _FINDER_SHIFT:
-        return (f"Maj + Cmd + {name} sert déjà dans le Finder. Choisis une autre "
-                "lettre, ou Maj + Cmd + Espace.")
+        return tr("{shortcut} est déjà un raccourci de macOS (Réglages Système, "
+                  "Clavier, Raccourcis clavier). Choisis-en un autre.",
+                  shortcut=label(mods, vk))
+    letter = _typed(code) if code in _LETTERS or code in _PUNCTUATION else ""
+    if (mods, letter) in _BY_LETTER:
+        return tr(_BY_LETTER[(mods, letter)])
+    if mods == CMD | SHIFT and letter and letter in _FINDER_SHIFT:
+        return tr("Maj + Cmd + {key} sert déjà dans le Finder. Choisis une autre "
+                  "lettre, ou Maj + Cmd + Espace.", key=letter)
     if code in _F_KEYS and _F_KEYS[code] >= 13 and not mods:
         return None          # F13 to F20 alone: rare keys (programmable mouse buttons)
     if not mods & (CMD | CTRL):
-        return ("Il faut Cmd ou Ctrl dans la combinaison : macOS refuse les raccourcis "
-                "faits seulement d'Option ou de Maj.")
+        return tr("Il faut Cmd ou Ctrl dans la combinaison : macOS refuse les raccourcis "
+                  "faits seulement d'Option ou de Maj.")
     if mods == CMD:
-        return ("Cmd + une seule touche sert déjà dans toutes les applications (copier, "
-                f"coller, enregistrer…). Ajoute Maj, Option ou Ctrl, par exemple "
-                f"Maj + Cmd + {name}.")
+        return tr("Cmd + une seule touche sert déjà dans toutes les applications (copier, "
+                  "coller, enregistrer…). Ajoute Maj, Option ou Ctrl, par exemple "
+                  "Maj + Cmd + {key}.", key=key_name(vk))
     if mods == CTRL and code in _ARROWS:
-        return "Ctrl + les flèches passent d'un bureau à l'autre (Mission Control)."
+        return tr("Ctrl + les flèches passent d'un bureau à l'autre (Mission Control).")
     return None
 
 

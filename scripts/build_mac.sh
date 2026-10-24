@@ -112,6 +112,25 @@ APP="$ROOT/dist/mac/Cerclic.app"
 codesign --verify --deep --strict "$APP" 2>/dev/null || codesign --force --deep -s - "$APP"
 
 say "Vérification de Cerclic.app"
+# Ses langues (cerclic_mac.spec) : un vrai dossier <langue>.lproj par langue dans
+# Contents/Resources, avec InfoPlist.strings (la phrase de la demande d'autorisation),
+# et chacune déclarée dans Info.plist ; sinon macOS parle une autre langue.
+LANGS_FOUND=0
+LOCALIZATIONS="$(plutil -extract CFBundleLocalizations json -o - "$APP/Contents/Info.plist" 2>/dev/null || true)"
+for src in installer/mac/*.lproj; do
+  lproj="$(basename "$src")"
+  dest="$APP/Contents/Resources/$lproj"
+  { [ -d "$dest" ] && [ ! -L "$dest" ] && [ -f "$dest/InfoPlist.strings" ]; } \
+    || fail "Contents/Resources/$lproj/InfoPlist.strings manque dans Cerclic.app."
+  plutil -lint -s "$dest/InfoPlist.strings" || fail "$lproj/InfoPlist.strings est mal écrit."
+  case "$LOCALIZATIONS" in
+    *"\"${lproj%.lproj}\""*) ;;
+    *) fail "${lproj%.lproj} manque dans CFBundleLocalizations (Info.plist)." ;;
+  esac
+  LANGS_FOUND=$((LANGS_FOUND + 1))
+done
+[ "$LANGS_FOUND" -ge 10 ] || fail "Cerclic.app n'a que $LANGS_FOUND langues sur 10."
+echo "$LANGS_FOUND langues"
 "$APP/Contents/MacOS/Cerclic" --selftest || fail "Cerclic.app ne fonctionne pas entièrement (voir au-dessus)."
 
 VERSION="$("$PY" -c 'import re; print(re.search(r"__version__ = \"([^\"]+)\"", open("cerclic/__init__.py").read()).group(1))')"

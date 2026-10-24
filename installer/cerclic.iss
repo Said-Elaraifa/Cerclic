@@ -10,6 +10,12 @@
 #define MyAppPublisher "Said El Araifa"
 #define MyAppExeName "Cerclic.exe"
 
+; Arabic is an official translation of Inno Setup from 6.4.1 on: with an older
+; compiler, the installer speaks English to Arabic-speaking Windows instead.
+#if FileExists(CompilerPath + "Languages\Arabic.isl")
+  #define HaveArabic
+#endif
+
 [Setup]
 AppId={{B7E9B9B1-5C2A-4E2E-9E8A-CERCLIC00001}
 AppName={#MyAppName}
@@ -37,12 +43,69 @@ MinVersion=10.0.17763
 CloseApplications=no
 RestartApplications=no
 ChangesAssociations=yes
+; the language of Windows, never asked (LanguageDetectionMethod: uilanguage),
+; also for an update (older versions were in French only); English, the
+; first one below, when Cerclic does not have it
+ShowLanguageDialog=no
+UsePreviousLanguage=no
 
 [Languages]
+; only the official translations that come with Inno Setup 6 (no Chinese among them)
+Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
+Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
+Name: "german"; MessagesFile: "compiler:Languages\German.isl"
+Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
+Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+#ifdef HaveArabic
+Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
+#endif
+Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
+Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
+
+[CustomMessages]
+; Cerclic's own texts, in every language above (%n: a new line)
+english.DesktopIcon=Create a desktop shortcut
+english.ShortcutsGroup=Shortcuts:
+english.LaunchCerclic=Launch Cerclic
+english.DirNotWritable=Cerclic can't be installed in this folder: Windows protects it (administrator rights would be needed) or it can't be accessed.%nChoose a folder of your own, for example in Documents, or keep the one suggested.
+french.DesktopIcon=Créer un raccourci sur le Bureau
+french.ShortcutsGroup=Raccourcis :
+french.LaunchCerclic=Lancer Cerclic
+french.DirNotWritable=Cerclic ne peut pas s'installer dans ce dossier : Windows le protège (il faudrait des droits d'administrateur) ou il n'est pas accessible.%nChoisis un dossier à toi, par exemple dans Documents, ou garde celui proposé.
+spanish.DesktopIcon=Crear un acceso directo en el escritorio
+spanish.ShortcutsGroup=Accesos directos:
+spanish.LaunchCerclic=Abrir Cerclic
+spanish.DirNotWritable=Cerclic no se puede instalar en esta carpeta: Windows la protege (harían falta permisos de administrador) o no se puede acceder a ella.%nElige una carpeta tuya, por ejemplo en Documentos, o deja la que se propone.
+german.DesktopIcon=Verknüpfung auf dem Desktop erstellen
+german.ShortcutsGroup=Verknüpfungen:
+german.LaunchCerclic=Cerclic starten
+german.DirNotWritable=Cerclic kann nicht in diesem Ordner installiert werden: Windows schützt ihn (dafür wären Administratorrechte nötig) oder er ist nicht zugänglich.%nWähle einen eigenen Ordner, zum Beispiel unter „Dokumente“, oder behalte den vorgeschlagenen Ordner.
+italian.DesktopIcon=Crea un collegamento sul desktop
+italian.ShortcutsGroup=Collegamenti:
+italian.LaunchCerclic=Avvia Cerclic
+italian.DirNotWritable=Cerclic non può essere installato in questa cartella: Windows la protegge (servirebbero i diritti di amministratore) oppure non è accessibile.%nScegli una cartella tua, ad esempio in Documenti, oppure mantieni quella proposta.
+brazilianportuguese.DesktopIcon=Criar um atalho na área de trabalho
+brazilianportuguese.ShortcutsGroup=Atalhos:
+brazilianportuguese.LaunchCerclic=Abrir o Cerclic
+brazilianportuguese.DirNotWritable=O Cerclic não pode ser instalado nesta pasta: o Windows a protege (seriam necessárias permissões de administrador) ou ela não está acessível.%nEscolha uma pasta sua, por exemplo em Documentos, ou mantenha a pasta sugerida.
+#ifdef HaveArabic
+arabic.DesktopIcon=إنشاء اختصار على سطح المكتب
+arabic.ShortcutsGroup=الاختصارات:
+arabic.LaunchCerclic=تشغيل Cerclic
+arabic.DirNotWritable=لا يمكن تثبيت Cerclic في هذا المجلد: إما أن Windows يحميه (يلزم الحصول على صلاحيات المسؤول) وإما أنه غير قابل للوصول.%nاختر مجلدًا خاصًا بك، في «المستندات» مثلًا، أو احتفظ بالمجلد المقترح.
+#endif
+turkish.DesktopIcon=Masaüstünde kısayol oluştur
+turkish.ShortcutsGroup=Kısayollar:
+turkish.LaunchCerclic=Cerclic'i başlat
+turkish.DirNotWritable=Cerclic bu klasöre yüklenemiyor: Windows bu klasörü koruyor (yönetici hakları gerekir) ya da klasöre erişilemiyor.%nKendinize ait bir klasör seçin (örneğin Belgeler içinde) ya da önerilen klasörü kullanın.
+japanese.DesktopIcon=デスクトップにショートカットを作成する
+japanese.ShortcutsGroup=ショートカット:
+japanese.LaunchCerclic=Cerclic を起動する
+japanese.DirNotWritable=このフォルダには Cerclic をインストールできません。Windows によって保護されている (管理者権限が必要です) か、アクセスできません。%n「ドキュメント」の中など自分のフォルダを選ぶか、提案されたフォルダをそのまま使ってください。
 
 [Tasks]
-Name: "desktopicon"; Description: "Créer un raccourci sur le Bureau"; GroupDescription: "Raccourcis :"
+Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:ShortcutsGroup}"
 
 [Files]
 Source: "..\dist\Cerclic\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -65,7 +128,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Type: filesandordirs; Name: "{userappdata}\Cerclic"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Lancer Cerclic"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchCerclic}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const
@@ -158,10 +221,7 @@ begin
   Result := True;
   if (CurPageID = wpSelectDir) and not DirWritable(WizardDirValue()) then
   begin
-    SuppressibleMsgBox('Cerclic ne peut pas s''installer dans ce dossier : Windows le protège ' +
-           '(il faudrait des droits d''administrateur) ou il n''est pas accessible.' + #13#10 +
-           'Choisis un dossier à toi, par exemple dans Documents, ou garde celui proposé.',
-           mbError, MB_OK, IDOK);
+    SuppressibleMsgBox(CustomMessage('DirNotWritable'), mbError, MB_OK, IDOK);
     Result := False;
   end;
 end;
