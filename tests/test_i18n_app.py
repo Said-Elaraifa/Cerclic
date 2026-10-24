@@ -1,6 +1,7 @@
 """Choosing Cerclic's language: the setting, the window and the menu made again
 in it at once, Arabic from right to left."""
 import pytest
+import shiboken6
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel
 
@@ -89,7 +90,8 @@ def test_choosing_a_language_relabels_the_window_at_once(qtbot, app):
     assert Settings.load().get("language") == "en"
     qtbot.waitUntil(lambda: app._settings_window() not in (None, win), timeout=3000)
     new = app._settings_window()
-    assert new.isVisible() and not win.isVisible()
+    assert new.isVisible()
+    assert not shiboken6.isValid(win) or not win.isVisible()    # closed (or already gone)
     assert new.nav["general"].text() == "General"         # rebuilt in English
     assert "General" in _texts(new) and "Language" in _texts(new)
     assert new.language.currentData() == "en"

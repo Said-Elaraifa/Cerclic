@@ -217,7 +217,8 @@ def test_pyinstaller_puts_lproj_in_resources(tmp_path):
     out = {d.replace("\\", "/"): (s.replace("\\", "/"), t)
            for d, s, t in bundle._process_bundle_toc(toc)}
     for lang in ("en", "zh-Hans"):
-        assert out[f"Contents/Resources/{lang}.lproj/InfoPlist.strings"] == (src, "DATA")
+        assert out[f"Contents/Resources/{lang}.lproj/InfoPlist.strings"] == \
+            (src.replace("\\", "/"), "DATA")
         assert f"Contents/Resources/{lang}.lproj" not in out          # a real folder
         assert out[f"Contents/Frameworks/{lang}.lproj"] == (f"../Resources/{lang}.lproj",
                                                             "SYMLINK")
