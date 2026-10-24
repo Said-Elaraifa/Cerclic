@@ -14,8 +14,9 @@ import os
 import queue
 import threading
 
-from . import engine
+from . import engine, i18n
 from .actions import registry
+from .i18n import tr
 
 ISOLATE_BYTES = 8_000_000          # PDFs bigger than this go to a worker process
 ALWAYS_ISOLATED = {"pdf_to_word"}  # long pure-Python work, heavy imports
@@ -52,10 +53,13 @@ def run_job(action_id: str, paths: list[str], opts: dict, on_progress=None,
 
 # ----- worker process ----------------------------------------------------------
 
-def _worker(action_id: str, paths: list[str], opts: dict, q) -> None:
-    """Entry point of the worker process (no Qt here)."""
+def _worker(action_id: str, paths: list[str], opts: dict, q, lang: str = "") -> None:
+    """Entry point of the worker process (no Qt here). `lang`: the language
+    Cerclic speaks, so that its messages and the names it gives are the app's."""
     if os.environ.get("CERCLIC_TEST_WORKER_DIES"):   # tests: a native crash
         os._exit(3)
+    if lang:
+        i18n.set_language(lang)
     from . import paths as _paths
     _paths.add_reserve_hook(lambda p: q.put(("reserved", p)))
     res = engine.run(action_id, paths, opts,
@@ -68,7 +72,8 @@ def run_isolated(action_id: str, paths: list[str], opts: dict, on_progress=None,
     import multiprocessing as mp
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
-    proc = ctx.Process(target=_worker, args=(action_id, list(paths), dict(opts), q),
+    proc = ctx.Process(target=_worker,
+                       args=(action_id, list(paths), dict(opts), q, i18n.current()),
                        daemon=True, name="cerclic-worker")
     proc.start()
     try:
@@ -97,7 +102,7 @@ def run_isolated(action_id: str, paths: list[str], opts: dict, on_progress=None,
                 proc.kill()
                 proc.join(5)
                 engine._cleanup(reserved)
-                return engine.Result(action_id, False, [], "Annulé", cancelled=True)
+                return engine.Result(action_id, False, [], tr("Annulé"), cancelled=True)
             try:
                 handle(q.get(timeout=0.1))
             except queue.Empty:
@@ -111,8 +116,8 @@ def run_isolated(action_id: str, paths: list[str], opts: dict, on_progress=None,
                         engine._cleanup(reserved)
                         return engine.Result(
                             action_id, False, [],
-                            "Le traitement s'est arrêté net : le fichier est "
-                            "probablement endommagé.")
+                            tr("Le traitement s'est arrêté net : le fichier est "
+                               "probablement endommagé."))
         proc.join(10)
         return result
     finally:

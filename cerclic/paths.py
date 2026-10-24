@@ -13,6 +13,8 @@ import os
 import re
 import threading
 
+from .i18n import N_, tr
+
 _track = threading.local()
 _out = threading.local()
 
@@ -227,19 +229,29 @@ def _short(stem: str) -> str:
 
 
 # What a result's name says it is: '<name> (<this>)'. Format names (jpg, pdf,
-# mp3...) stay as they are; the words are in French, agreeing with "fichier".
+# mp3...) stay as they are; the words are in French, agreeing with "fichier",
+# and written in the language in use when the file is made.
 TAG_NAMES = {
-    "compressed": "compressé", "resized": "redimensionné", "rotated": "pivoté",
-    "cropped": "rogné", "mirrored": "miroir", "clean": "anonymisé",
-    "assembled": "assemblé", "merged": "fusionné", "organized": "réorganisé",
-    "extract": "extrait", "text": "texte", "watermark": "filigrane",
-    "numbered": "numéroté", "signed": "signé", "protected": "protégé",
-    "unlocked": "déverrouillé", "audio": "son", "cut": "raccourci", "muted": "sans son",
+    "compressed": N_("compressé"), "resized": N_("redimensionné"),
+    "rotated": N_("pivoté"), "cropped": N_("rogné"), "mirrored": N_("miroir"),
+    "clean": N_("anonymisé"), "assembled": N_("assemblé"), "merged": N_("fusionné"),
+    "organized": N_("réorganisé"), "extract": N_("extrait"), "text": N_("texte"),
+    "watermark": N_("filigrane"), "numbered": N_("numéroté"), "signed": N_("signé"),
+    "protected": N_("protégé"), "unlocked": N_("déverrouillé"), "audio": N_("son"),
+    "cut": N_("raccourci"), "muted": N_("sans son"), "images": N_("images"),
+    "pages": N_("pages"),
 }
+
+_NOT_IN_NAMES = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 def tag_name(tag: str) -> str:
-    return TAG_NAMES.get(tag, tag)
+    """The word of a result's name, in the language in use; a tag that is no
+    known word (a format name, the French word of a social format) goes
+    through tr() as is. Characters no file name may hold are left out."""
+    french = TAG_NAMES.get(tag, tag)
+    word = " ".join(_NOT_IN_NAMES.sub(" ", tr(french)).split()).strip(" .")
+    return word or french
 
 
 def unique_path(folder: str, stem: str, ext: str, tag: str | None = None) -> str:

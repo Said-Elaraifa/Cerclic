@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from . import paths as _paths
 from .actions import registry
 from .errors import Cancelled, NeedsPassword, NothingToDo, UserError
+from .i18n import tr, trn
 from .log import log_exception
 
 __all__ = ["Cancelled", "Context", "NeedsPassword", "NothingToDo", "Result",
@@ -76,30 +77,30 @@ class Context:
 
 
 def friendly_error(exc: BaseException) -> str:
-    """Turn an exception into a short French sentence."""
+    """Turn an exception into a short sentence, in the language in use."""
     if isinstance(exc, UserError):
         return str(exc)
     if isinstance(exc, PermissionError):
-        return ("Accès refusé : le fichier est peut-être ouvert dans une autre "
-                "application, ou le dossier est protégé.")
+        return tr("Accès refusé : le fichier est peut-être ouvert dans une autre "
+                  "application, ou le dossier est protégé.")
     long_name = len(str(getattr(exc, "filename", "") or "")) >= 250
     if isinstance(exc, OSError) and (long_name or getattr(exc, "errno", None) == errno.ENAMETOOLONG
                                      or getattr(exc, "winerror", None) == 206):
-        return ("Nom ou chemin trop long pour Windows : renomme le fichier plus court, "
-                "ou déplace-le dans un dossier moins profond.")
+        return tr("Nom ou chemin trop long pour Windows : renomme le fichier plus court, "
+                  "ou déplace-le dans un dossier moins profond.")
     if isinstance(exc, FileNotFoundError):
-        return "Fichier introuvable : il a peut-être été déplacé ou supprimé."
+        return tr("Fichier introuvable : il a peut-être été déplacé ou supprimé.")
     if isinstance(exc, MemoryError):
-        return "Fichier trop lourd pour la mémoire disponible."
+        return tr("Fichier trop lourd pour la mémoire disponible.")
     if isinstance(exc, OSError) and getattr(exc, "errno", None) == errno.ENOSPC:
-        return "Le disque est plein."
+        return tr("Le disque est plein.")
     name = type(exc).__name__
     if name in ("UnidentifiedImageError", "DecompressionBombError"):
-        return "Image illisible ou format non pris en charge."
+        return tr("Image illisible ou format non pris en charge.")
     if name in ("FileDataError", "EmptyFileError", "PdfError"):
-        return "PDF endommagé ou illisible."
-    return ("Erreur inattendue. Réessaie ; si cela recommence, le détail est dans "
-            "le journal de Cerclic (cerclic.log).")
+        return tr("PDF endommagé ou illisible.")
+    return tr("Erreur inattendue. Réessaie ; si cela recommence, le détail est dans "
+              "le journal de Cerclic (cerclic.log).")
 
 
 def _cleanup(reserved: list[str]) -> None:
@@ -125,13 +126,17 @@ def run(action_id: str, paths: list[str], opts: dict | None = None,
             gone = [p for p in paths if not os.path.exists(p)]
             if gone:
                 name = os.path.basename(gone[0])
-                raise UserError(f"« {name} » n'est plus là : il a été déplacé, renommé "
-                                "ou supprimé (ou la clé USB retirée)." if len(gone) == 1
-                                else f"{len(gone)} fichiers ne sont plus là : ils ont été "
-                                     "déplacés, renommés ou supprimés.")
+                raise UserError(tr("« {name} » n'est plus là : il a été déplacé, renommé "
+                                   "ou supprimé (ou la clé USB retirée).", name=name)
+                                if len(gone) == 1 else
+                                trn("{n} fichier n'est plus là : il a été déplacé, "
+                                    "renommé ou supprimé.",
+                                    "{n} fichiers ne sont plus là : ils ont été "
+                                    "déplacés, renommés ou supprimés.", len(gone)))
             if len(paths) < action.min_files:
-                raise UserError(f"{action.label} : il faut au moins "
-                                f"{action.min_files} fichiers.")
+                raise UserError(trn("{action} : il faut au moins {n} fichier.",
+                                    "{action} : il faut au moins {n} fichiers.",
+                                    action.min_files, action=tr(action.label)))
             outputs = [o for o in action.handler(paths, opts, ctx) if o]
             ctx.check()
             from .sizes import size_of
@@ -140,7 +145,7 @@ def run(action_id: str, paths: list[str], opts: dict | None = None,
                           bytes_before=size_of(ctx.sources), bytes_after=size_of(outputs))
         except Cancelled:
             _cleanup(reserved)
-            return Result(action_id, False, [], "Annulé", time.perf_counter() - t0,
+            return Result(action_id, False, [], tr("Annulé"), time.perf_counter() - t0,
                           cancelled=True)
         except NeedsPassword as exc:
             _cleanup(reserved)

@@ -5,22 +5,31 @@ from __future__ import annotations
 import os
 import sys
 
+from .i18n import decimal, tr, trn
+
 BASE = 1000 if sys.platform == "darwin" else 1024
+
+
+def _unit(i: int, size: str) -> str:
+    """size + unit (Ko, Mo, Go, To), as each language writes them."""
+    if i == 0:
+        return tr("{size} Ko", size=size)
+    if i == 1:
+        return tr("{size} Mo", size=size)
+    if i == 2:
+        return tr("{size} Go", size=size)
+    return tr("{size} To", size=size)
 
 
 def human(n: float) -> str:
     """1 234 567 octets -> « 1,2 Mo »."""
     n = max(0.0, float(n))
     if n < BASE:
-        return f"{int(n)} octet{'s' if n >= 2 else ''}"
-    for unit in ("Ko", "Mo", "Go", "To"):
+        return trn("{n} octet", "{n} octets", int(n))
+    for i in range(4):
         n /= BASE
-        if n < BASE - 0.5 or unit == "To":
-            if n < 10:
-                text = f"{n:.1f}"
-            else:
-                text = f"{n:.0f}"
-            return text.replace(".", ",") + " " + unit
+        if n < BASE - 0.5 or i == 3:
+            return _unit(i, decimal(n, 1 if n < 10 else 0))
     return ""
 
 
@@ -50,15 +59,15 @@ def gain(before: float, after: float) -> str:
         return ""
     pct = round((before - after) * 100 / before)
     if pct > 0:
-        return f"{pct} % de moins"
+        return tr("{pct} % de moins", pct=pct)
     if pct < 0:
-        return f"{-pct} % de plus"
-    return "même taille"
+        return tr("{pct} % de plus", pct=-pct)
+    return tr("même taille")
 
 
 def change(before: float, after: float) -> str:
     """« De 4,2 Mo à 612 Ko · 85 % de moins » (in words: an arrow is missing
     from some fonts)."""
-    text = f"De {human(before)} à {human(after)}"
+    text = tr("De {before} à {after}", before=human(before), after=human(after))
     g = gain(before, after)
     return f"{text} · {g}" if g else text

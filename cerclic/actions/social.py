@@ -17,19 +17,21 @@ from dataclasses import dataclass
 from PIL import Image, ImageEnhance, ImageFilter
 
 from ..errors import NothingToDo, UserError
+from ..i18n import N_, tr
 from ..paths import output_for
 from . import images, video
 
 
 @dataclass(frozen=True)
 class Format:
+    """label, ratio, where and tag stay French (N_): tr(f.label) shows them."""
     key: str
     label: str          # on its button
     ratio: str          # its shape, as the networks write it
     width: int
     height: int
     where: str          # what it is for
-    tag: str            # in the result's name
+    tag: str            # in the result's name (translated when the file is made)
 
     @property
     def aspect(self) -> float:
@@ -41,18 +43,20 @@ class Format:
 
 
 FORMATS = (
-    Format("square", "Carré", "1:1", 1080, 1080,
-           "Publication Instagram, Facebook ou LinkedIn", "carré"),
-    Format("portrait", "Portrait", "4:5", 1080, 1350,
-           "Publication Instagram ou Facebook, la plus grande dans le fil", "portrait"),
-    Format("grid", "Grille", "3:4", 1080, 1440,
-           "Instagram, à la forme exacte de la grille du profil", "grille"),
-    Format("story", "Story", "9:16", 1080, 1920,
-           "Plein écran de téléphone : Story, Reels, TikTok, YouTube Shorts", "story"),
-    Format("landscape", "Paysage", "16:9", 1920, 1080,
-           "Écran d'ordinateur : YouTube, présentation, X", "paysage"),
-    Format("banner", "Bannière", "1,91:1", 1200, 630,
-           "Lien partagé ou image large sur Facebook, LinkedIn ou X", "bannière"),
+    Format("square", N_("Carré"), "1:1", 1080, 1080,
+           N_("Publication Instagram, Facebook ou LinkedIn"), N_("carré")),
+    Format("portrait", N_("Portrait"), "4:5", 1080, 1350,
+           N_("Publication Instagram ou Facebook, la plus grande dans le fil"),
+           N_("portrait")),
+    Format("grid", N_("Grille"), "3:4", 1080, 1440,
+           N_("Instagram, à la forme exacte de la grille du profil"), N_("grille")),
+    Format("story", N_("Story"), "9:16", 1080, 1920,
+           N_("Plein écran de téléphone : Story, Reels, TikTok, YouTube Shorts"),
+           N_("story")),
+    Format("landscape", N_("Paysage"), "16:9", 1920, 1080,
+           N_("Écran d'ordinateur : YouTube, présentation, X"), N_("paysage")),
+    Format("banner", N_("Bannière"), N_("1,91:1"), 1200, 630,
+           N_("Lien partagé ou image large sur Facebook, LinkedIn ou X"), N_("bannière")),
 )
 BY_KEY = {f.key: f for f in FORMATS}
 MODES = ("fill", "blur", "white", "black")
@@ -169,7 +173,7 @@ def social_image(src: str, key: str, mode: str = "fill", center=(0.5, 0.5),
     W, H = im.size
     if (W, H) == (f.width, f.height) and (mode != "fill" or zoom <= 1.001) \
             and im.mode == "RGB":
-        raise NothingToDo(f"Cette image est déjà en {f.size_text}.")
+        raise NothingToDo(tr("Cette image est déjà en {size}.", size=f.size_text))
     result = compose(im, f, mode, center, zoom)
     out = output_for(src, f.tag, new_ext=".jpg")
     images.save(images.Picture([result]), out, "jpg", quality=quality)
@@ -221,9 +225,9 @@ def social_video(src: str, key: str, mode: str = "blur", center=(0.5, 0.5),
     video._need_video(info)
     W, H = info.display_size
     if W <= 0 or H <= 0:
-        raise UserError("Taille de la vidéo illisible : fichier endommagé ?")
+        raise UserError(tr("Taille de la vidéo illisible : fichier endommagé ?"))
     if (round(W), round(H)) == (f.width, f.height) and (mode != "fill" or zoom <= 1.001):
-        raise NothingToDo(f"Cette vidéo est déjà en {f.size_text}.")
+        raise NothingToDo(tr("Cette vidéo est déjà en {size}.", size=f.size_text))
     graph = video_filter(W, H, f, mode, center, zoom, info.fps)
     out = output_for(src, f.tag, new_ext=".mp4")
     # (-map_metadata -1: nothing of the original's tags, such as the place
@@ -232,5 +236,5 @@ def social_video(src: str, key: str, mode: str = "blur", center=(0.5, 0.5),
                 "-map_metadata", "-1", "-map_chapters", "-1",
                 "-c:v", "libx264", "-crf", "20", "-preset", "faster",
                 "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out],
-               info.duration, ctx, f"Format {f.label.lower()}")
+               info.duration, ctx, tr("Format {name}", name=tr(f.tag)))
     return out

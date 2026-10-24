@@ -1,4 +1,7 @@
 """Exceptions shared by the actions and the engine."""
+from __future__ import annotations
+
+from .i18n import tr
 
 
 class Cancelled(Exception):
@@ -6,15 +9,16 @@ class Cancelled(Exception):
 
 
 class UserError(Exception):
-    """An expected problem; the message (French) is shown to the user as is."""
+    """An expected problem; the message, translated where it is raised
+    (tr), is shown to the user as is."""
 
 
 class NeedsPassword(UserError):
     """The PDF is protected and no (or a wrong) password was given."""
 
-    def __init__(self, message: str = "Ce PDF est protégé par un mot de passe.",
-                 path: str = ""):
-        super().__init__(message)
+    def __init__(self, message: str | None = None, path: str = ""):
+        super().__init__(tr("Ce PDF est protégé par un mot de passe.")
+                         if message is None else message)
         self.path = path
 
 

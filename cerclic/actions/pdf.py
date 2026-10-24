@@ -20,6 +20,7 @@ from typing import Sequence
 import pymupdf
 
 from ..errors import Cancelled, NeedsPassword, NothingToDo, UserError
+from ..i18n import tr
 from ..paths import output_dir_for, output_for
 from .common import check, progress
 
@@ -39,17 +40,23 @@ def open_pdf(src: str, password: str | None = None) -> pymupdf.Document:
     try:
         doc = pymupdf.open(src)
     except Exception:
-        raise UserError(f"PDF endommagé ou illisible : {os.path.basename(src)}")
+        raise UserError(tr("PDF endommagé ou illisible : {name}",
+                           name=os.path.basename(src)))
     if not doc.is_pdf:
         doc.close()
-        raise UserError(f"Ce fichier n'est pas un PDF : {os.path.basename(src)}")
+        raise UserError(tr("Ce fichier n'est pas un PDF : {name}", name=os.path.basename(src)))
     if doc.needs_pass:
         if not password or not doc.authenticate(password):
             doc.close()
-            msg = ("Mot de passe incorrect." if password
-                   else f"« {os.path.basename(src)} » est protégé par un mot de passe.")
-            raise NeedsPassword(msg, path=src)
+            raise NeedsPassword(_password_message(src, password), path=src)
     return doc
+
+
+def _password_message(src: str, password) -> str:
+    """Why this protected PDF did not open: a wrong password, or none."""
+    if password:
+        return tr("Mot de passe incorrect.")
+    return tr("« {name} » est protégé par un mot de passe.", name=os.path.basename(src))
 
 
 def needs_password(src: str) -> bool:
@@ -195,7 +202,7 @@ def pdf_to_images(src: str, fmt: str = "jpg", dpi: int = 150,
         written: list[str] = []
         for i, page in enumerate(doc, start=1):
             check(ctx)
-            progress(ctx, (i - 1) / n, f"Page {i} sur {n}")
+            progress(ctx, (i - 1) / n, tr("Page {i} sur {n}", i=i, n=n))
             pix = page.get_pixmap(dpi=dpi, alpha=False)
             im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
             path = os.path.join(out_dir, f"{stem}-{str(i).zfill(pad)}.{fmt}")
@@ -213,7 +220,7 @@ def images_to_pdf(srcs: Sequence[str], ctx=None) -> str:
     from .images import _flatten, _to_8bit, load, tiff_pages
     srcs = list(srcs)
     if not srcs:
-        raise UserError("Aucune image.")
+        raise UserError(tr("Aucune image."))
     out = output_for(srcs[0], "pdf", new_ext=".pdf")
 
     def pictures(src):
@@ -231,7 +238,7 @@ def images_to_pdf(srcs: Sequence[str], ctx=None) -> str:
         for i, src in enumerate(srcs):
             for im, alpha in pictures(src):
                 check(ctx)
-                progress(ctx, i / len(srcs), f"Image {i + 1} sur {len(srcs)}")
+                progress(ctx, i / len(srcs), tr("Image {i} sur {n}", i=i + 1, n=len(srcs)))
                 im = _to_8bit(im)
                 buf = io.BytesIO()
                 if alpha:
@@ -257,13 +264,13 @@ def merge_pdfs(srcs: Sequence[str], password=None, ctx=None) -> str:
     {path: password} dict (each protected file may have its own)."""
     srcs = list(srcs)
     if len(srcs) < 2:
-        raise UserError("Il faut au moins deux PDF pour fusionner.")
+        raise UserError(tr("Il faut au moins deux PDF pour fusionner."))
     out = output_for(srcs[0], "merged", new_ext=".pdf")
     doc = pymupdf.open()
     try:
         for i, p in enumerate(srcs):
             check(ctx)
-            progress(ctx, i / len(srcs), f"PDF {i + 1} sur {len(srcs)}")
+            progress(ctx, i / len(srcs), tr("PDF {i} sur {n}", i=i + 1, n=len(srcs)))
             pw = password.get(p) if isinstance(password, dict) else password
             with open_pdf(p, pw) as part:
                 doc.insert_pdf(part)
@@ -280,14 +287,14 @@ def split_pdf(src: str, every: int = 1, password: str | None = None,
     with open_pdf(src, password) as doc:
         n = doc.page_count
         if n < 2:
-            raise NothingToDo("Ce PDF n'a qu'une page.")
+            raise NothingToDo(tr("Ce PDF n'a qu'une page."))
         out_dir = output_dir_for(src, "pages")
         pad = max(2, len(str(n)))
         written: list[str] = []
         start = 0
         while start < n:
             check(ctx)
-            progress(ctx, start / n, f"Page {start + 1} sur {n}")
+            progress(ctx, start / n, tr("Page {i} sur {n}", i=start + 1, n=n))
             end = min(start + every, n)
             part = pymupdf.open()
             part.insert_pdf(doc, from_page=start, to_page=end - 1)
@@ -313,13 +320,13 @@ def arrange_pdf(src: str, order: Sequence, password: str | None = None,
         idx, rot = (it, 0) if isinstance(it, int) else (int(it[0]), int(it[1]))
         items.append((idx, rot % 360))
     if not items:
-        raise UserError("Aucune page à garder.")
+        raise UserError(tr("Aucune page à garder."))
     with open_pdf(src, password) as doc:
         n = doc.page_count
         if any(not 0 <= idx < n for idx, _ in items):
-            raise UserError("Page introuvable dans ce PDF.")
+            raise UserError(tr("Page introuvable dans ce PDF."))
         if [idx for idx, _ in items] == list(range(n)) and not any(r for _, r in items):
-            raise NothingToDo("Les pages n'ont pas changé.")
+            raise NothingToDo(tr("Les pages n'ont pas changé."))
         out = output_for(src, tag, new_ext=".pdf")
         doc.select([idx for idx, _ in items])
         for page, (_, rot) in zip(doc, items):
@@ -336,10 +343,10 @@ def pdf_to_text(src: str, password: str | None = None, ctx=None) -> str:
         pages = []
         for i, page in enumerate(doc):
             check(ctx)
-            progress(ctx, i / max(1, n), f"Page {i + 1} sur {n}")
+            progress(ctx, i / max(1, n), tr("Page {i} sur {n}", i=i + 1, n=n))
             pages.append(page.get_text("text").strip())     # reading order
     if not any(pages):
-        raise NothingToDo("Aucun texte dans ce PDF : c'est sûrement un scan (une image).")
+        raise NothingToDo(tr("Aucun texte dans ce PDF : c'est sûrement un scan (une image)."))
     out = output_for(src, "text", new_ext=".txt")
     text = "\n\n".join(p for p in pages)
     with open(out, "w", encoding="utf-8-sig", newline="\r\n") as f:
@@ -464,7 +471,7 @@ def _downsample_images(doc: pymupdf.Document, skip: set[int], dpi_threshold: int
             check(ctx)
             if not _plain_image(doc, img):
                 continue
-            progress(ctx, min(1.0, len(done) / total), "Compression des images")
+            progress(ctx, min(1.0, len(done) / total), tr("Compression des images"))
             size_pt = shown.get(xref, 0.0)
             if size_pt <= 0:
                 continue
@@ -539,7 +546,7 @@ def compress_pdf(src: str, password: str | None = None, ctx=None, level: str = "
                      clean=True, use_objstms=1)
     touched = False
     with open_pdf(src, password) as doc:
-        progress(ctx, None, "Compression des images")
+        progress(ctx, None, tr("Compression des images"))
         delicate = _delicate_images(doc)
         try:
             # Plain photos and scans go to exactly the target (150 dpi...): MuPDF
@@ -548,7 +555,7 @@ def compress_pdf(src: str, password: str | None = None, ctx=None, level: str = "
                                          ctx=ctx) > 0
             if not delicate:
                 # ...then MuPDF re-encodes everything else (masks, palettes...).
-                progress(ctx, None, "Compression des images")
+                progress(ctx, None, tr("Compression des images"))
                 doc.rewrite_images(dpi_threshold=dpi_threshold, dpi_target=dpi_target,
                                    quality=quality)
                 touched = True
@@ -560,7 +567,7 @@ def compress_pdf(src: str, password: str | None = None, ctx=None, level: str = "
         if touched:
             _save(doc, out, **save_opts)
     if touched:
-        progress(ctx, None, "Vérification")
+        progress(ctx, None, tr("Vérification"))
         if not _looks_the_same(src, out, password):
             touched = False      # keep every image as it was
     if not touched:
@@ -569,7 +576,7 @@ def compress_pdf(src: str, password: str | None = None, ctx=None, level: str = "
     check(ctx)
     if os.path.getsize(out) >= os.path.getsize(src) * 0.98:
         os.remove(out)
-        raise NothingToDo("Ce PDF est déjà bien compressé.")
+        raise NothingToDo(tr("Ce PDF est déjà bien compressé."))
     return out
 
 
@@ -589,9 +596,9 @@ def crop_pdf(src: str, rel_box: Sequence[float], page_index: int | None = None,
     Applies to every page, or only to `page_index` when given."""
     x0, y0, x1, y1 = (float(v) for v in rel_box)
     if x1 - x0 < 0.005 or y1 - y0 < 0.005:
-        raise UserError("La zone à rogner est vide.")
+        raise UserError(tr("La zone à rogner est vide."))
     if x0 <= 0.001 and y0 <= 0.001 and x1 >= 0.999 and y1 >= 0.999:
-        raise NothingToDo("Le cadre couvre toute la page : rien à rogner.")
+        raise NothingToDo(tr("Le cadre couvre toute la page : rien à rogner."))
     out = output_for(src, "cropped", new_ext=".pdf")
     with open_pdf(src, password) as doc:
         for i, page in enumerate(doc):
@@ -618,7 +625,7 @@ def pdf_to_word(src: str, password: str | None = None, ctx=None) -> str:
     with open_pdf(src, password):
         pass  # fails early with a clear message if locked or damaged
     out = output_for(src, "word", new_ext=".docx")
-    progress(ctx, None, "Conversion en Word")
+    progress(ctx, None, tr("Conversion en Word"))
     cv = Converter(src, password=password) if password else Converter(src)
     try:
         cv.convert(out)
@@ -633,7 +640,7 @@ def add_watermark(src: str, text: str, password: str | None = None,
                   opacity: float = 0.14, ctx=None) -> str:
     text = (text or "").strip()
     if not text:
-        raise UserError("Le texte du filigrane est vide.")
+        raise UserError(tr("Le texte du filigrane est vide."))
     font = pymupdf.Font("helv")
     out = output_for(src, "watermark", new_ext=".pdf")
 
@@ -653,7 +660,7 @@ def add_watermark(src: str, text: str, password: str | None = None,
         n = doc.page_count
         for i, page in enumerate(doc):
             check(ctx)
-            progress(ctx, i / n, f"Page {i + 1} sur {n}")
+            progress(ctx, i / n, tr("Page {i} sur {n}", i=i + 1, n=n))
             _stamp(page, draw)
         _save(doc, out)
     return out
@@ -667,7 +674,7 @@ def add_page_numbers(src: str, password: str | None = None, size: float = 10,
         total = doc.page_count
         for i, page in enumerate(doc):
             check(ctx)
-            progress(ctx, i / total, f"Page {i + 1} sur {total}")
+            progress(ctx, i / total, tr("Page {i} sur {n}", i=i + 1, n=total))
             label = f"{i + 1} / {total}"
 
             def draw(op, W, H, label=label):
@@ -695,7 +702,7 @@ def sign_pdf(src: str, signature_png: str, page_index: int = -1,
     """Place the signature image on one page (last page by default).
     rel_box = (x0, y0, x1, y1), fractions of the visible page."""
     if not signature_png or not os.path.exists(signature_png):
-        raise UserError("Aucune signature enregistrée.")
+        raise UserError(tr("Aucune signature enregistrée."))
     from PIL import Image
     with Image.open(signature_png) as sig:
         sw, sh = sig.size
@@ -721,10 +728,11 @@ def sign_pdf(src: str, signature_png: str, page_index: int = -1,
 def protect_pdf(src: str, password: str) -> str:
     import pikepdf
     if not password:
-        raise UserError("Le mot de passe est vide.")
+        raise UserError(tr("Le mot de passe est vide."))
     if needs_password(src):
-        raise UserError("Ce PDF a déjà un mot de passe. Pour en mettre un autre, "
-                        "retire d'abord celui-ci (Plus, puis Déverrouiller).")
+        raise UserError(tr("Ce PDF a déjà un mot de passe. Pour en mettre un autre, "
+                           "retire d'abord celui-ci ({more}, puis {action}).",
+                           more=tr("Plus"), action=tr("Déverrouiller")))
     out = output_for(src, "protected", new_ext=".pdf")
     with pikepdf.open(src) as pdf:
         pdf.save(out, encryption=pikepdf.Encryption(owner=password, user=password, R=6))
@@ -734,7 +742,7 @@ def protect_pdf(src: str, password: str) -> str:
 def unlock_pdf(src: str, password: str = "") -> str:
     import pikepdf
     if not is_encrypted(src):
-        raise NothingToDo("Ce PDF n'est pas protégé.")
+        raise NothingToDo(tr("Ce PDF n'est pas protégé."))
     pdf = None
     tries = [password or ""]
     try:            # older PDFs (RC4, AES-128) store accented passwords as Latin-1
@@ -748,9 +756,7 @@ def unlock_pdf(src: str, password: str = "") -> str:
         except pikepdf.PasswordError:
             continue
     if pdf is None:
-        raise NeedsPassword("Mot de passe incorrect." if password else
-                            f"« {os.path.basename(src)} » est protégé par un mot de passe.",
-                            path=src)
+        raise NeedsPassword(_password_message(src, password), path=src)
     out = output_for(src, "unlocked", new_ext=".pdf")
     with pdf:
         pdf.save(out)

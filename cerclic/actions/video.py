@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass
 
 from ..errors import Cancelled, UserError
+from ..i18n import tr
 from ..paths import output_for
 from .common import progress
 
@@ -39,7 +40,7 @@ def ffmpeg_path() -> str:
     found = shutil.which("ffmpeg")
     if found:
         return found
-    raise UserError("ffmpeg est introuvable : réinstalle Cerclic.")
+    raise UserError(tr("ffmpeg est introuvable : réinstalle Cerclic."))
 
 
 @dataclass
@@ -166,20 +167,21 @@ def _measure_duration(src: str, should_stop=None, timeout: float = 120.0) -> flo
 def _friendly_ffmpeg_error(tail: str) -> str:
     low = tail.lower()
     if "invalid data found" in low or "moov atom not found" in low:
-        return "Vidéo endommagée ou format non pris en charge."
+        return tr("Vidéo endommagée ou format non pris en charge.")
     if "permission denied" in low:
-        return "Accès refusé : le fichier est peut-être ouvert dans une autre application."
+        return tr("Accès refusé : le fichier est peut-être ouvert dans une autre application.")
     if "no space left" in low:
-        return "Le disque est plein."
+        return tr("Le disque est plein.")
     if "no such file" in low:
-        return "Fichier introuvable : il a peut-être été déplacé ou supprimé."
+        return tr("Fichier introuvable : il a peut-être été déplacé ou supprimé.")
     from ..log import log
     log("ffmpeg : " + tail.strip()[-600:])
-    return ("Le traitement a échoué : le fichier est peut-être endommagé ou dans un "
-            "format inhabituel.")
+    return tr("Le traitement a échoué : le fichier est peut-être endommagé ou dans un "
+              "format inhabituel.")
 
 
 def _run(args: list[str], duration: float, ctx, label: str, cwd: str | None = None) -> None:
+    """Run ffmpeg; `label` (already translated) is what the progress says."""
     exe = ffmpeg_path()
     cmd = [exe, "-y", "-hide_banner", "-nostdin", "-loglevel", "error",
            "-progress", "pipe:1", "-nostats", *args]
@@ -229,9 +231,10 @@ def _run(args: list[str], duration: float, ctx, label: str, cwd: str | None = No
 def _need_video(info: Probe) -> None:
     if not info.has_video:
         if info.has_audio:
-            raise UserError("Ce fichier ne contient que du son, pas d'image : utilise "
-                            "« Extraire le son » pour en faire un MP3.")
-        raise UserError("Aucune image vidéo dans ce fichier.")
+            raise UserError(tr("Ce fichier ne contient que du son, pas d'image : utilise "
+                               "« {action} » pour en faire un MP3.",
+                               action=tr("Extraire le son")))
+        raise UserError(tr("Aucune image vidéo dans ce fichier."))
 
 
 EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
@@ -279,12 +282,12 @@ def compress_video(src: str, level: str = "medium", ctx=None,
         return compress_audio(src, sound_level(level), ctx=ctx)
     _need_video(info)
     out = output_for(src, "compressed", new_ext=".mp4")
-    _run(["-i", src, *_video_args(level), out], info.duration, ctx, "Compression")
+    _run(["-i", src, *_video_args(level), out], info.duration, ctx, tr("Compression"))
     if os.path.getsize(out) >= os.path.getsize(src) * 0.98:
         from ..errors import NothingToDo
         os.remove(out)
-        raise NothingToDo("Cette vidéo est déjà bien compressée : essaie une compression "
-                          "plus forte.")
+        raise NothingToDo(tr("Cette vidéo est déjà bien compressée : essaie une compression "
+                             "plus forte."))
     return out
 
 
@@ -338,7 +341,7 @@ def estimate_compressed(src: str, level: str, workdir: str, should_stop=None):
     info = probe(src, should_stop=should_stop)
     if not info.has_video:
         if not info.has_audio:
-            raise UserError("Aucun son dans ce fichier.")
+            raise UserError(tr("Aucun son dans ce fichier."))
         from ..paths import kind_of
         sound = sound_level(level) if kind_of(src) == "video" else level
         kbps = mp3_kbps(AUDIO_LEVELS.get(sound, AUDIO_LEVELS["strong"]), info.audio_rate)
@@ -346,7 +349,7 @@ def estimate_compressed(src: str, level: str, workdir: str, should_stop=None):
     _need_video(info)
     duration = info.duration
     if duration <= 0:
-        raise UserError("Durée illisible : fichier endommagé ?")
+        raise UserError(tr("Durée illisible : fichier endommagé ?"))
     quiet = _Quiet(should_stop)
     made: list[str] = []
     try:
@@ -355,7 +358,7 @@ def estimate_compressed(src: str, level: str, workdir: str, should_stop=None):
             made.append(out)
             _run(["-i", src, *_video_args(level), out], duration, quiet, "")
             if os.path.getsize(out) >= os.path.getsize(src) * 0.98:
-                raise NothingToDo("Pas plus léger")
+                raise NothingToDo(tr("Pas plus léger"))
             made.clear()                         # handed over: it is the result
             return os.path.getsize(out), True, out
         return _estimate_from_samples(src, info, level, workdir, quiet, made), False, None
@@ -481,7 +484,7 @@ def to_mp4(src: str, ctx=None) -> str:
     _run(["-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-vf", EVEN,
           "-c:v", "libx264", "-crf", "20", "-preset", "faster",
           "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
-          "-movflags", "+faststart", out], info.duration, ctx, "Conversion en MP4")
+          "-movflags", "+faststart", out], info.duration, ctx, tr("Conversion en MP4"))
     return out
 
 
@@ -494,18 +497,18 @@ def to_gif(src: str, fps: int = 12, width: int = 480, ctx=None) -> str:
     info = probe(src, should_stop=_stopper(ctx))
     _need_video(info)
     if info.duration > GIF_MAX_SECONDS:
-        raise UserError("Vidéo trop longue pour un GIF (plus de 2 minutes : il "
-                        "pèserait des centaines de Mo). Garde d'abord un passage avec "
-                        "« Raccourcir ».")
+        raise UserError(tr("Vidéo trop longue pour un GIF (plus de 2 minutes : il "
+                           "pèserait des centaines de Mo). Garde d'abord un passage avec "
+                           "« {action} ».", action=tr("Raccourcir")))
     out = output_for(src, "gif", new_ext=".gif")
     scale = f"fps={fps},scale='min({width},iw)':-2:flags=lanczos"
     tmpdir = tempfile.mkdtemp(prefix="cerclic-gif-")
     palette = os.path.join(tmpdir, "palette.png")
     try:
         _run(["-i", src, "-vf", f"{scale},palettegen=stats_mode=diff", palette],
-             info.duration, _Half(ctx, 0.0), "Conversion en GIF")
+             info.duration, _Half(ctx, 0.0), tr("Conversion en GIF"))
         _run(["-i", src, "-i", palette, "-lavfi", f"{scale}[x];[x][1:v]paletteuse",
-              "-loop", "0", out], info.duration, _Half(ctx, 0.5), "Conversion en GIF")
+              "-loop", "0", out], info.duration, _Half(ctx, 0.5), tr("Conversion en GIF"))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
     return out
@@ -535,10 +538,10 @@ def extract_mp3(src: str, ctx=None) -> str:
     from ..errors import NothingToDo
     info = probe(src, should_stop=_stopper(ctx))
     if not info.has_audio:
-        raise NothingToDo("Cette vidéo n'a pas de son.")
+        raise NothingToDo(tr("Cette vidéo n'a pas de son."))
     out = output_for(src, "audio", new_ext=".mp3")
     _run(["-i", src, "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "2", out],
-         info.duration, ctx, "Extraction du son")
+         info.duration, ctx, tr("Extraction du son"))
     return out
 
 
@@ -573,10 +576,10 @@ def trim_media(src: str, start: float, end: float, ctx=None) -> str:
     if duration > 0:
         end = min(end, duration)
     if end - start < 0.1:
-        raise UserError("Le passage à garder est trop court.")
+        raise UserError(tr("Le passage à garder est trop court."))
     if duration > 0 and start <= 0.05 and end >= duration - 0.05:
         from ..errors import NothingToDo
-        raise NothingToDo("Le passage choisi est la totalité du fichier.")
+        raise NothingToDo(tr("Le passage choisi est la totalité du fichier."))
     length = end - start
     if kind_of(src) == "video" and (info.has_video or not info.has_audio):
         _need_video(info)
@@ -585,14 +588,14 @@ def trim_media(src: str, start: float, end: float, ctx=None) -> str:
               "-map", "0:v:0", "-map", "0:a:0?", "-vf", EVEN,
               "-c:v", "libx264", "-crf", "20", "-preset", "faster",
               "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
-              "-movflags", "+faststart", out], length, ctx, "Découpage")
+              "-movflags", "+faststart", out], length, ctx, tr("Découpage"))
         return out
     if not info.has_audio:
-        raise UserError("Aucun son dans ce fichier.")
+        raise UserError(tr("Aucun son dans ce fichier."))
     ext, codec = _AUDIO_KEEP.get(ext_of(src), _MP3)
     out = output_for(src, "cut", new_ext=ext)
     _run(["-ss", _fmt_time(start), "-i", src, "-t", _fmt_time(length),
-          "-map", "0:a:0", "-vn", *codec, out], length, ctx, "Découpage")
+          "-map", "0:a:0", "-vn", *codec, out], length, ctx, tr("Découpage"))
     return out
 
 
@@ -603,11 +606,11 @@ def mute_video(src: str, ctx=None) -> str:
     info = probe(src, should_stop=_stopper(ctx))
     _need_video(info)
     if not info.has_audio:
-        raise NothingToDo("Cette vidéo n'a pas de son.")
+        raise NothingToDo(tr("Cette vidéo n'a pas de son."))
     out = output_for(src, "muted", new_ext=ext_of(src) or ".mp4")
     try:
         _run(["-i", src, "-map", "0:v", "-c", "copy", "-an", out],
-             info.duration, ctx, "Suppression du son")
+             info.duration, ctx, tr("Suppression du son"))
         return out
     except UserError:
         try:
@@ -617,7 +620,7 @@ def mute_video(src: str, ctx=None) -> str:
     out = output_for(src, "muted", new_ext=".mp4")       # odd file: re-encode it
     _run(["-i", src, "-map", "0:v:0", "-an", "-vf", EVEN, "-c:v", "libx264",
           "-crf", "20", "-preset", "faster", "-pix_fmt", "yuv420p",
-          "-movflags", "+faststart", out], info.duration, ctx, "Suppression du son")
+          "-movflags", "+faststart", out], info.duration, ctx, tr("Suppression du son"))
     return out
 
 
@@ -636,7 +639,7 @@ def rotate_video(src: str, degrees: int = 90, ctx=None) -> str:
     _run(["-i", src, "-map", "0:v:0", "-map", "0:a:0?",
           "-vf", f"{_TRANSPOSE[deg]},{EVEN}", "-c:v", "libx264", "-crf", "20",
           "-preset", "faster", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
-          "-movflags", "+faststart", out], info.duration, ctx, "Rotation")
+          "-movflags", "+faststart", out], info.duration, ctx, tr("Rotation"))
     return out
 
 
@@ -646,13 +649,13 @@ def audio_to_mp3(src: str, ctx=None) -> str:
     from ..errors import NothingToDo
     from ..paths import ext_of
     if ext_of(src) == ".mp3":
-        raise NothingToDo("C'est déjà un MP3.")
+        raise NothingToDo(tr("C'est déjà un {format}.", format="MP3"))
     info = probe(src, should_stop=_stopper(ctx))
     if not info.has_audio:
-        raise UserError("Aucun son dans ce fichier.")
+        raise UserError(tr("Aucun son dans ce fichier."))
     out = output_for(src, "mp3", new_ext=".mp3")
     _run(["-i", src, "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "2", out],
-         info.duration, ctx, "Conversion en MP3")
+         info.duration, ctx, tr("Conversion en MP3"))
     return out
 
 
@@ -681,9 +684,9 @@ def _capture(args: list[str], timeout: float = 20.0, should_stop=None) -> bytes:
                 proc.communicate()
                 if stopped:
                     raise Cancelled()
-                raise UserError("Aperçu trop long à préparer.")
+                raise UserError(tr("Aperçu trop long à préparer."))
     if proc.returncode != 0 or not out:
-        raise UserError("Aperçu impossible.")
+        raise UserError(tr("Aperçu impossible."))
     return out
 
 
@@ -714,12 +717,12 @@ def compress_audio(src: str, level: str = "strong", ctx=None) -> str:
     from ..errors import NothingToDo
     info = probe(src, should_stop=_stopper(ctx))
     if not info.has_audio:
-        raise UserError("Aucun son dans ce fichier.")
+        raise UserError(tr("Aucun son dans ce fichier."))
     kbps = AUDIO_LEVELS.get(level, AUDIO_LEVELS["strong"])
     out = output_for(src, "compressed", new_ext=".mp3")
     _run(["-i", src, "-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-b:a", f"{kbps}k", out],
-         info.duration, ctx, "Compression")
+         info.duration, ctx, tr("Compression"))
     if os.path.getsize(out) >= os.path.getsize(src) * 0.95:
         os.remove(out)
-        raise NothingToDo("Ce son est déjà léger : essaie une compression plus forte.")
+        raise NothingToDo(tr("Ce son est déjà léger : essaie une compression plus forte."))
     return out

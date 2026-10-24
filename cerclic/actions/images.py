@@ -17,6 +17,7 @@ from typing import Callable, Sequence
 from PIL import Image, ImageOps, ImageSequence
 
 from ..errors import LeftOut, NothingToDo, UserError
+from ..i18n import tr, trn
 from ..paths import ext_of, output_for
 
 # Allow very large panoramas, but still refuse absurd (malicious) sizes.
@@ -102,7 +103,7 @@ def load(src: str, first_frame: bool = False) -> Picture:
     try:
         im = Image.open(src)
     except Image.UnidentifiedImageError:
-        raise UserError("Image illisible ou format non pris en charge.")
+        raise UserError(tr("Image illisible ou format non pris en charge."))
     with im:
         fmt = im.format or ""
         icc = im.info.get("icc_profile")
@@ -133,9 +134,11 @@ def _one_page(src: str, pic: Picture) -> None:
     """Edits write one picture: leave out a multi-page TIFF rather than
     silently keep only its first page."""
     if pic.pages > 1:
-        raise LeftOut(f"« {os.path.basename(src)} » a {pic.pages} pages : seule la "
-                      "première serait gardée. Utilise « En PDF » pour les garder "
-                      "toutes.")
+        raise LeftOut(trn("« {name} » a {n} page : seule la première serait gardée. "
+                          "Utilise « {action} » pour les garder toutes.",
+                          "« {name} » a {n} pages : seule la première serait gardée. "
+                          "Utilise « {action} » pour les garder toutes.", pic.pages,
+                          name=os.path.basename(src), action=tr("En PDF")))
 
 
 def page_count(src: str) -> int:
@@ -344,7 +347,7 @@ def convert_image(src: str, fmt: str, quality: int | None = None) -> str:
     pic = load(src)
     if _EXT_FORMAT.get(ext_of(src)) == fmt and not pic.is_cmyk:
         # (a print-colour JPG does become a screen-colour one: that is useful)
-        raise NothingToDo(f"C'est déjà un {fmt.upper()}.")
+        raise NothingToDo(tr("C'est déjà un {format}.", format=fmt.upper()))
     pic = pic.to_srgb()
     _one_page(src, pic)
     if pic.animated and fmt != "webp":
@@ -414,7 +417,7 @@ def compress_image(src: str, quality: int = 70) -> str:
     _one_page(src, pic)
     _, ext, data = compressed_data(pic, ext_of(src), quality)
     if len(data) >= os.path.getsize(src):
-        raise NothingToDo("Cette image est déjà bien compressée.")
+        raise NothingToDo(tr("Cette image est déjà bien compressée."))
     out = output_for(src, "compressed", new_ext=ext)
     with open(out, "wb") as f:
         f.write(data)
@@ -431,7 +434,7 @@ def resize_image(src: str, max_side: int | None = None,
         target = (max(1, round(w * percent / 100)), max(1, round(h * percent / 100)))
     elif max_side:
         if max(w, h) <= max_side:
-            raise NothingToDo(f"L'image fait déjà {max(w, h)} px ou moins.")
+            raise NothingToDo(tr("L'image fait déjà {size} px ou moins.", size=max(w, h)))
         scale = max_side / max(w, h)
         target = (max(1, round(w * scale)), max(1, round(h * scale)))
     else:
@@ -463,9 +466,9 @@ def crop_image(src: str, box: Sequence[float], quality: int | None = None) -> st
     left, top = max(0, left), max(0, top)
     right, bottom = min(w, right), min(h, bottom)
     if right - left < 1 or bottom - top < 1:
-        raise UserError("La zone à rogner est vide.")
+        raise UserError(tr("La zone à rogner est vide."))
     if (left, top, right, bottom) == (0, 0, w, h):
-        raise NothingToDo("Le cadre couvre toute l'image : rien à rogner.")
+        raise NothingToDo(tr("Le cadre couvre toute l'image : rien à rogner."))
     pic = pic.map(lambda f: f.crop((left, top, right, bottom)))
     return _write(src, pic, "cropped", quality=quality)
 
@@ -489,7 +492,8 @@ def _strip_jpeg(data: bytes) -> tuple[bytes, bool]:
     """Remove EXIF (GPS, camera, dates), XMP, IPTC, comments and anything glued
     after the picture (phones append extra images and videos there, with their
     own GPS) from a JPEG, without re-encoding it. The colour profile and the
-    orientation are kept."""
+    orientation are kept. (Its errors, like those of _strip_png and _strip_webp,
+    are never shown: strip_metadata re-encodes such a file instead.)"""
     if data[:2] != b"\xff\xd8":
         raise UserError("JPEG illisible.")
     orientation = 1
@@ -644,7 +648,7 @@ def strip_metadata(src: str, quality: int | None = None) -> str:
         clean, removed = None, True             # unusual file: re-encode it instead
     if clean is not None:
         if not removed:
-            raise NothingToDo("Cette image ne contient aucune information privée.")
+            raise NothingToDo(tr("Cette image ne contient aucune information privée."))
         out = output_for(src, "clean")
         with open(out, "wb") as f:
             f.write(clean)
@@ -691,13 +695,13 @@ def assemble_images(srcs: Sequence[str], layout: str = "row",
     from statistics import median
     srcs = list(srcs)
     if len(srcs) < 2:
-        raise UserError("Il faut au moins deux images.")
+        raise UserError(tr("Il faut au moins deux images."))
     sizes = []
     for s_ in srcs:
         try:
             sizes.append(oriented_size(s_))
         except Exception:
-            raise UserError(f"Image illisible : {os.path.basename(s_)}")
+            raise UserError(tr("Image illisible : {name}", name=os.path.basename(s_)))
     gap = 0
     if layout == "row":
         H = min(2400, median(h for _, h in sizes))
@@ -725,7 +729,7 @@ def assemble_images(srcs: Sequence[str], layout: str = "row",
     for i, src in enumerate(srcs):
         if ctx is not None:
             ctx.check()
-            ctx.progress(i / (len(srcs) + 1), f"Image {i + 1} sur {len(srcs)}")
+            ctx.progress(i / (len(srcs) + 1), tr("Image {i} sur {n}", i=i + 1, n=len(srcs)))
         pic = load(src)
         icc = pic.icc
         im = _to_8bit(pic.to_srgb().frames[0])
@@ -758,7 +762,7 @@ def assemble_images(srcs: Sequence[str], layout: str = "row",
     fmt = "png" if canvas.mode == "RGBA" else "jpg"
     out = output_for(srcs[0], "assembled", new_ext=FORMATS[fmt][1])
     if ctx is not None:
-        ctx.progress(len(srcs) / (len(srcs) + 1), "Assemblage")
+        ctx.progress(len(srcs) / (len(srcs) + 1), tr("Assemblage"))
     save(Picture([canvas]), out, fmt, quality=quality)
     return out
 
