@@ -15,6 +15,7 @@ import threading
 from ctypes import wintypes
 from typing import Callable
 
+from ..i18n import N_, tr, trc
 from ..log import log
 
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
@@ -27,23 +28,36 @@ DEFAULT_MODS = MOD_CONTROL | MOD_ALT
 DEFAULT_VK = VK_SPACE
 _ON_WINDOWS = sys.platform == "win32"
 
-_KEY_NAMES = {
-    0x20: "Espace", 0x09: "Tab", 0x0D: "Entrée", 0x08: "Retour", 0x1B: "Échap", 0x2D: "Inser",
-    0x2E: "Suppr", 0x24: "Origine", 0x23: "Fin", 0x21: "Page préc.", 0x22: "Page suiv.",
-    0x25: "←", 0x26: "↑", 0x27: "→", 0x28: "↓", 0x13: "Pause", 0x2C: "Impr. écran",
-    0x6A: "Pavé *", 0x6B: "Pavé +", 0x6D: "Pavé -", 0x6E: "Pavé .", 0x6F: "Pavé /",
-}
+_ARROWS = {0x25: "←", 0x26: "↑", 0x27: "→", 0x28: "↓"}
+_KEYPAD_SIGNS = {0x6A: "*", 0x6B: "+", 0x6D: "-", 0x6E: ".", 0x6F: "/"}
+
+
+def _names() -> dict[int, str]:
+    """The keys that type no character, named as on the keyboards of the
+    language in use (made at each call: the language can change)."""
+    return {
+        0x20: trc("touche Windows", "Espace"), 0x09: trc("touche Windows", "Tab"),
+        0x0D: trc("touche Windows", "Entrée"),
+        0x08: trc("touche Windows", "Retour"),               # Backspace
+        0x1B: trc("touche Windows", "Échap"), 0x2D: trc("touche Windows", "Inser"),
+        0x2E: trc("touche Windows", "Suppr"), 0x24: trc("touche Windows", "Origine"),
+        0x23: trc("touche Windows", "Fin"), 0x21: trc("touche Windows", "Page préc."),
+        0x22: trc("touche Windows", "Page suiv."), 0x13: trc("touche Windows", "Pause"),
+        0x2C: trc("touche Windows", "Impr. écran"),
+    }
+
+
 # Punctuation keys depend on the keyboard layout: asked to Windows, else AZERTY.
 _AZERTY = {0xBA: "$", 0xBB: "=", 0xBC: ",", 0xBD: "-", 0xBE: ";", 0xBF: ":",
            0xC0: "ù", 0xDB: ")", 0xDC: "*", 0xDD: "^", 0xDE: "²", 0xDF: "!", 0xE2: "<"}
-_RESERVED = {
-    (MOD_ALT, 0x73): "Alt + F4 ferme les fenêtres.",
-    (MOD_ALT, 0x09): "Alt + Tab change de fenêtre.",
-    (MOD_ALT, 0x1B): "Alt + Échap change de fenêtre.",
-    (MOD_ALT, 0x20): "Alt + Espace ouvre le menu des fenêtres.",
-    (MOD_CONTROL, 0x1B): "Ctrl + Échap ouvre le menu Démarrer.",
-    (MOD_CONTROL | MOD_ALT, 0x2E): "Ctrl + Alt + Suppr est réservé à Windows.",
-    (MOD_CONTROL | MOD_SHIFT, 0x1B): "Ctrl + Maj + Échap ouvre le Gestionnaire des tâches.",
+_RESERVED = {                         # N_(): translated when shown (check)
+    (MOD_ALT, 0x73): N_("Alt + F4 ferme les fenêtres."),
+    (MOD_ALT, 0x09): N_("Alt + Tab change de fenêtre."),
+    (MOD_ALT, 0x1B): N_("Alt + Échap change de fenêtre."),
+    (MOD_ALT, 0x20): N_("Alt + Espace ouvre le menu des fenêtres."),
+    (MOD_CONTROL, 0x1B): N_("Ctrl + Échap ouvre le menu Démarrer."),
+    (MOD_CONTROL | MOD_ALT, 0x2E): N_("Ctrl + Alt + Suppr est réservé à Windows."),
+    (MOD_CONTROL | MOD_SHIFT, 0x1B): N_("Ctrl + Maj + Échap ouvre le Gestionnaire des tâches."),
 }
 _ALTGR_LETTERS = set(b"EQMOAC")       # AltGr types €, @, µ, œ, æ, © with them (AZERTY)
 
@@ -57,30 +71,40 @@ def _layout_char(vk: int) -> str:
 
 
 def key_name(vk: int) -> str:
+    """The name of a key, in the language in use. Never " + " in it: the
+    settings window splits label() on it (tests/test_i18n_system.py checks
+    the catalogues)."""
     if 0x41 <= vk <= 0x5A or 0x30 <= vk <= 0x39:
         return chr(vk)
     if 0x70 <= vk <= 0x87:
         return f"F{vk - 0x6F}"
     if 0x60 <= vk <= 0x69:
-        return f"Pavé {vk - 0x60}"
-    if vk in _KEY_NAMES:
-        return _KEY_NAMES[vk]
+        return trc("touche Windows", "Pavé {key}", key=str(vk - 0x60))
+    if vk in _KEYPAD_SIGNS:
+        return trc("touche Windows", "Pavé {key}", key=_KEYPAD_SIGNS[vk])
+    if vk in _ARROWS:
+        return _ARROWS[vk]
+    names = _names()
+    if vk in names:
+        return names[vk]
     if 0xBA <= vk <= 0xE2:
-        return _layout_char(vk) or _AZERTY.get(vk, f"Touche {vk}")
-    return f"Touche {vk}"
+        return (_layout_char(vk) or _AZERTY.get(vk)
+                or trc("touche Windows", "Touche {code}", code=vk))
+    return trc("touche Windows", "Touche {code}", code=vk)
 
 
 def label(mods: int, vk: int) -> str:
-    """'Ctrl + Alt + Espace', 'Win + Maj + C' (in the order Windows writes them)."""
+    """'Ctrl + Alt + Espace', 'Win + Maj + C' (in the order Windows writes them),
+    in the language in use."""
     parts = []
     if mods & MOD_WIN:
-        parts.append("Win")
+        parts.append(trc("touche Windows", "Win"))
     if mods & MOD_CONTROL:
-        parts.append("Ctrl")
+        parts.append(trc("touche Windows", "Ctrl"))
     if mods & MOD_ALT:
-        parts.append("Alt")
+        parts.append(trc("touche Windows", "Alt"))
     if mods & MOD_SHIFT:
-        parts.append("Maj")
+        parts.append(trc("touche Windows", "Maj"))
     parts.append(key_name(vk))
     return " + ".join(parts)
 
@@ -116,40 +140,42 @@ def _altgr_types(vk: int, shift: bool) -> bool | None:
 
 
 def check(mods: int, vk: int) -> str | None:
-    """Why this combination should not be used, or None if it is fine."""
+    """Why this combination should not be used (in the language in use), or
+    None if it is fine."""
     mods &= MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_WIN
     if not vk or vk in (0x10, 0x11, 0x12, 0x5B, 0x5C):
-        return "Ajoute une touche après Ctrl, Alt, Maj ou Win."
+        return tr("Ajoute une touche après Ctrl, Alt, Maj ou Win.")
     if (mods, vk) in _RESERVED:
-        return _RESERVED[(mods, vk)]
+        return tr(_RESERVED[(mods, vk)])
     if 0x7C <= vk <= 0x87 and not mods:
         return None          # F13 to F24 alone: rare keys (programmable mouse buttons)
     if 0x70 <= vk <= 0x7B and not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN):
-        return (f"{key_name(vk)} sert déjà dans Windows et les applications (aide, "
-                "renommer, actualiser, orthographe…). Ajoute par exemple Ctrl + Alt : "
-                f"Ctrl + Alt + {key_name(vk)}.")
+        return tr("{key} sert déjà dans Windows et les applications (aide, renommer, "
+                  "actualiser, orthographe…). Ajoute par exemple Ctrl + Alt : "
+                  "Ctrl + Alt + {key}.", key=key_name(vk))
     if 0x60 <= vk <= 0x69 and mods & MOD_ALT and not mods & (MOD_CONTROL | MOD_WIN):
-        return ("Alt avec le pavé numérique sert à taper des caractères "
-                "(Alt + 0201 = É). Choisis une autre combinaison.")
+        return tr("Alt avec le pavé numérique sert à taper des caractères "
+                  "(Alt + 0201 = É). Choisis une autre combinaison.")
     if not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN):
-        return ("Il faut Ctrl, Alt ou Win dans la combinaison (sinon cette touche "
-                "ne s'écrirait plus).")
+        return tr("Il faut Ctrl, Alt ou Win dans la combinaison (sinon cette touche "
+                  "ne s'écrirait plus).")
     if mods & MOD_WIN:
         pass                                           # Win + key: Windows says if taken
     elif bin(mods).count("1") < 2:
-        name, uses, other = (("Ctrl", "gras, copier, coller, enregistrer…", "Alt")
-                             if mods & MOD_CONTROL
-                             else ("Alt", "les menus des applications", "Ctrl"))
-        return (f"{name} + une seule touche sert déjà dans beaucoup d'applications "
-                f"({uses}). Ajoute Maj ou {other}, par exemple "
-                f"{name} + Maj + {key_name(vk)}.")
+        if mods & MOD_CONTROL:
+            return tr("Ctrl + une seule touche sert déjà dans beaucoup d'applications "
+                      "(gras, copier, coller, enregistrer…). Ajoute Maj ou Alt, par "
+                      "exemple Ctrl + Maj + {key}.", key=key_name(vk))
+        return tr("Alt + une seule touche sert déjà dans beaucoup d'applications "
+                  "(les menus des applications). Ajoute Maj ou Ctrl, par exemple "
+                  "Alt + Maj + {key}.", key=key_name(vk))
     if mods & MOD_CONTROL and mods & MOD_ALT and not mods & MOD_WIN:
         typed = _altgr_types(vk, bool(mods & MOD_SHIFT)) if _ON_WINDOWS else None
         if typed is None:
             typed = 0x30 <= vk <= 0x39 or vk >= 0xBA or vk in _ALTGR_LETTERS
         if typed:
-            return ("Cette combinaison sert à taper des caractères (@, €, #, œ…) avec "
-                    "AltGr. Choisis-en une autre.")
+            return tr("Cette combinaison sert à taper des caractères (@, €, #, œ…) "
+                      "avec AltGr. Choisis-en une autre.")
     return None
 
 

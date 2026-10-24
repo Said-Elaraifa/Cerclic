@@ -1,0 +1,14 @@
+/* Cerclic: the texts of Info.plist (cerclic_mac.spec) in this language. */
+"NSAppleEventsUsageDescription" = "Cerclic lee los archivos seleccionados en el Finder cuando usas su atajo de teclado.";
+"NSHumanReadableCopyright" = "Said El Araifa, licencia MIT";
+"Fichier pour Cerclic" = "Archivo para Cerclic";
+"Vidéo Matroska" = "Vídeo Matroska";
+"Vidéo WebM" = "Vídeo WebM";
+"Vidéo Flash" = "Vídeo Flash";
+"Vidéo WMV" = "Vídeo WMV";
+"Son Ogg" = "Audio Ogg";
+"Son Opus" = "Audio Opus";
+"Son FLAC" = "Audio FLAC";
+"Son WMA" = "Audio WMA";
+"Son AMR" = "Audio AMR";
+"Image AVIF" = "Imagen AVIF";

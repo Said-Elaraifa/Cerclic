@@ -10,6 +10,16 @@ with open(os.path.join(ROOT, "cerclic", "__init__.py"), encoding="utf-8") as f:
     VERSION = re.search(r'__version__ = "([^"]+)"', f.read()).group(1)
 
 datas = [(os.path.join(ROOT, "assets", "LICENCES.txt"), ".")]
+
+# The languages of Cerclic (cerclic/i18n.py), named as macOS names them: macOS
+# then shows its own panels (open, save, permission questions) in the Mac's
+# language, English when Cerclic does not have it (CFBundleDevelopmentRegion).
+# <lang>.lproj/InfoPlist.strings translates the texts of Info.plist below; as
+# data, each folder lands in Contents/Resources (PyInstaller only links it from
+# Contents/Frameworks), which scripts/build_mac.sh checks after the build.
+LOCALIZATIONS = ["en", "fr", "es", "de", "it", "pt-BR", "ar", "tr", "zh-Hans", "ja"]
+datas += [(os.path.join(ROOT, "installer", "mac", f"{lang}.lproj", "InfoPlist.strings"),
+           f"{lang}.lproj") for lang in LOCALIZATIONS]
 binaries = []
 hiddenimports = []
 
@@ -71,7 +81,8 @@ coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Cerclic")
 
 def _imported(uti: str, conforms: str, exts: list[str], name: str) -> dict:
     """A file format macOS may not know: declared so that it counts as an
-    image, a video or a sound (Quick Action, « Ouvrir avec »)."""
+    image, a video or a sound (Quick Action, « Ouvrir avec »). Its name is
+    translated by InfoPlist.strings (the French name is the key)."""
     return {"UTTypeIdentifier": uti, "UTTypeDescription": name,
             "UTTypeConformsTo": [conforms, "public.data"],
             "UTTypeTagSpecification": {"public.filename-extension": exts}}
@@ -101,7 +112,8 @@ app = BUNDLE(
         "CFBundleDisplayName": "Cerclic",
         "CFBundleShortVersionString": VERSION,
         "CFBundleVersion": VERSION,
-        "CFBundleDevelopmentRegion": "fr",
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleLocalizations": LOCALIZATIONS,
         "NSPrincipalClass": "NSApplication",
         "LSUIElement": True,                         # menu bar app, no Dock icon
         "LSMinimumSystemVersion": "12.0",
@@ -112,7 +124,8 @@ app = BUNDLE(
         "NSAppleEventsUsageDescription": (
             "Cerclic lit les fichiers sélectionnés dans le Finder quand tu utilises "
             "son raccourci clavier."),
-        # « Ouvrir avec » and drops on the icon (never the default application)
+        # « Ouvrir avec » and drops on the icon (never the default application);
+        # the type name is translated by InfoPlist.strings, as the texts above
         "CFBundleDocumentTypes": [{
             "CFBundleTypeName": "Fichier pour Cerclic",
             "CFBundleTypeRole": "Viewer",
