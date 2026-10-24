@@ -15,6 +15,8 @@ from PySide6.QtGui import QColor, QCursor, QGuiApplication, QImage
 from PySide6.QtWidgets import (QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout, QWidget)
 
+from ..i18n import tr, trc
+from ..system import IS_MAC
 from ..win.foreground import bring_to_front
 from .dismiss import DismissGuard
 from .theme import (ACCENT_STRONG, BUTTON_QSS, MUTED, SCROLL_QSS, SURFACE_2, TEXT,
@@ -94,6 +96,21 @@ class Loader(QObject):
                 res, err = None, friendly_error(exc)
             hub.done.emit(key, res, err)
         threading.Thread(target=work, daemon=True, name="cerclic-load").start()
+
+
+def enter_key() -> str:
+    """The key that validates a popup, named as on this keyboard."""
+    return trc("touche du Mac", "Retour") if IS_MAC else trc("touche", "Entrée")
+
+
+def delete_key() -> str:
+    """The key that removes (pages...), named as on this keyboard."""
+    return "⌫" if IS_MAC else trc("touche", "Suppr")
+
+
+def mod_key() -> str:
+    """The modifier of the shortcuts (Cmd on a Mac, Ctrl elsewhere)."""
+    return trc("touche du Mac", "Cmd") if IS_MAC else trc("touche", "Ctrl")
 
 
 def qimage_from_rgb(data: bytes, w: int, h: int, stride: int) -> QImage:
@@ -185,7 +202,7 @@ class EditorWindow(QWidget):
         top.addWidget(self.hint_label, 1)
         close = QPushButton("✕")
         close.setObjectName("close")
-        close.setToolTip("Fermer (Échap)")
+        close.setToolTip(tr("Fermer (Échap)"))
         close.setFixedSize(28, 26)
         close.setFocusPolicy(Qt.NoFocus)
         close.clicked.connect(self.cancel)
@@ -253,6 +270,11 @@ class EditorWindow(QWidget):
         b.setCheckable(checkable)
         b.setFocusPolicy(Qt.NoFocus)
         return b
+
+    def nav_arrows(self) -> tuple[str, str]:
+        """(back, forward) arrows: mirrored when the interface reads from the
+        right (the previous page is then on the right)."""
+        return ("›", "‹") if self.isRightToLeft() else ("‹", "›")
 
     def open_at(self, anchor: QPoint | None = None) -> None:
         """Show the popup centred on `anchor` (the wheel position)."""

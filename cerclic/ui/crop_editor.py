@@ -17,13 +17,14 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
 
+from ..i18n import N_, decimal, tr
 from ..paths import kind_of
-from .editor_base import (EditorWindow, Loader, fit_view, qimage_from_pil,
+from .editor_base import (EditorWindow, Loader, enter_key, fit_view, qimage_from_pil,
                           qimage_from_rgb)
-from ..system import ENTER_KEY
 from .theme import MUTED, font
 
-PRESETS = [("Libre", None), ("Original", "orig"), ("1:1", 1.0), ("4:5", 4 / 5),
+# (labels in French, translated where shown: tr(label); ratios stay as they are)
+PRESETS = [(N_("Libre"), None), (N_("Original"), "orig"), ("1:1", 1.0), ("4:5", 4 / 5),
            ("3:4", 3 / 4), ("16:9", 16 / 9), ("9:16", 9 / 16)]
 HANDLE_HIT = 14     # px around a handle that grabs it
 MARGIN = 12         # px around the picture (room for the handles)
@@ -95,7 +96,7 @@ class CropCanvas(QWidget):
         self.full = (1.0, 1.0)
         self.sel = QRectF()
         self.aspect: float | None = None
-        self.message = "Chargement…"
+        self.message = tr("Chargement…")
         self._mode = None
         self._press = QPointF()
         self._press_sel = QRectF()
@@ -423,7 +424,7 @@ class CropEditor(EditorWindow):
         self.path = path
         self.is_pdf = kind_of(path) == "pdf"
         super().__init__(os.path.basename(path),
-                         f"Glisse les coins · {ENTER_KEY} pour rogner")
+                         tr("Glisse les coins · {key} pour rogner", key=enter_key()))
         self.password = password
         self.canvas = CropCanvas()
         self.canvas.changed.connect(self._sync)
@@ -432,7 +433,7 @@ class CropEditor(EditorWindow):
 
         self._preset_btns = []
         for label, a in PRESETS:
-            b = self.chip(label)
+            b = self.chip(tr(label))
             b.setChecked(a is None)
             b.clicked.connect(lambda _=False, asp=a, btn=b: self._preset(asp, btn))
             self.tools.addWidget(b)
@@ -443,20 +444,21 @@ class CropEditor(EditorWindow):
         self.size_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         # wide enough for "12000 × 12000 px": the popup does not change width
         # while the frame is dragged
-        self.size_label.setMinimumWidth(
-            self.size_label.fontMetrics().horizontalAdvance("00000 × 00000 px") + 6)
+        self.size_label.setMinimumWidth(self.size_label.fontMetrics().horizontalAdvance(
+            tr("{width} × {height} px", width="00000", height="00000")) + 6)
         self.tools.addWidget(self.size_label)
 
         self.page = 0
         self.page_count = 1
         if self.is_pdf:
-            self.prev_btn = self.chip("‹", checkable=False)
+            back, forward = self.nav_arrows()
+            self.prev_btn = self.chip(back, checkable=False)
             self.prev_btn.clicked.connect(lambda: self._goto(self.page - 1))
             self.page_label = QLabel("")
             self.page_label.setObjectName("hint")
-            self.next_btn = self.chip("›", checkable=False)
+            self.next_btn = self.chip(forward, checkable=False)
             self.next_btn.clicked.connect(lambda: self._goto(self.page + 1))
-            self.all_pages = QCheckBox("Toutes les pages")
+            self.all_pages = QCheckBox(tr("Toutes les pages"))
             self.all_pages.setChecked(True)
             self.all_pages.setFocusPolicy(Qt.NoFocus)
             for w in (self.prev_btn, self.page_label, self.next_btn):
@@ -464,18 +466,18 @@ class CropEditor(EditorWindow):
             self.bar.addSpacing(6)
             self.bar.addWidget(self.all_pages)
         else:
-            reset = QPushButton("Image entière")
+            reset = QPushButton(tr("Image entière"))
             reset.setObjectName("ghost")
-            reset.setToolTip("Reprendre toute l'image")
+            reset.setToolTip(tr("Reprendre toute l'image"))
             reset.setFocusPolicy(Qt.NoFocus)
             reset.clicked.connect(self.canvas.reset)
             self.bar.addWidget(reset)
         self.bar.addStretch(1)
-        cancel = QPushButton("Annuler")
+        cancel = QPushButton(tr("Annuler"))
         cancel.setObjectName("ghost")
         cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
-        self.ok_btn = QPushButton("Rogner")
+        self.ok_btn = QPushButton(tr("Rogner"))
         self.ok_btn.setObjectName("primary")
         self.ok_btn.setEnabled(False)
         self.ok_btn.setFocusPolicy(Qt.NoFocus)
@@ -526,7 +528,7 @@ class CropEditor(EditorWindow):
         else:
             fn = lambda: (token, load_image_preview(path, w, h))
         self.canvas.image = None
-        self.canvas.message = "Chargement…"
+        self.canvas.message = tr("Chargement…")
         self.canvas.update()
         self.ok_btn.setEnabled(False)
         self._loader.run(fn)
@@ -552,7 +554,8 @@ class CropEditor(EditorWindow):
         self._sync()
 
     def _update_nav(self) -> None:
-        self.page_label.setText(f"{self.page + 1} / {self.page_count}")
+        self.page_label.setText(tr("{index} / {count}", index=self.page + 1,
+                                   count=self.page_count))
         self.prev_btn.setEnabled(self.page > 0)
         self.next_btn.setEnabled(self.page < self.page_count - 1)
         many = self.page_count > 1
@@ -582,11 +585,12 @@ class CropEditor(EditorWindow):
         if self.is_pdf:
             x0, y0, x1, y1 = self.canvas.rel_box()
             W, H = self.canvas.full
-            cm = lambda pt: f"{pt / 72 * 2.54:.1f}".replace(".", ",")
-            self.size_label.setText(f"{cm((x1 - x0) * W)} × {cm((y1 - y0) * H)} cm")
+            cm = lambda pt: decimal(pt / 72 * 2.54, 1)
+            self.size_label.setText(tr("{width} × {height} cm", width=cm((x1 - x0) * W),
+                                       height=cm((y1 - y0) * H)))
         else:
             l, t, r, b = self.canvas.pixel_box()
-            self.size_label.setText(f"{r - l} × {b - t} px")
+            self.size_label.setText(tr("{width} × {height} px", width=r - l, height=b - t))
 
     def validate(self) -> None:
         if self.canvas.image is None:

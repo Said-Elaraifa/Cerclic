@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QLabel, QListView, QListWidget
                                QListWidgetItem, QPushButton, QStyle,
                                QStyledItemDelegate)
 
-from .editor_base import EditorWindow, Loader, qimage_from_rgb
-from ..system import DELETE_KEY, MOD_KEY
+from ..i18n import tr, trn
+from .editor_base import EditorWindow, Loader, delete_key, mod_key, qimage_from_rgb
 from .theme import ACCENT, BG, MUTED, TEXT, base_font
 
 THUMB_H = 118           # thumbnail height, logical px
@@ -23,6 +23,15 @@ CELL = QSize(108, 150)  # one page in the grid, label included
 ROLE_PAGE = Qt.UserRole          # original page index
 ROLE_ROT = Qt.UserRole + 1       # extra rotation, degrees clockwise
 ROLE_IMG = Qt.UserRole + 2       # QImage thumbnail (None until rendered)
+
+
+def _step_of(widget, key) -> int:
+    """-1 towards the first page, 1 towards the last, for an arrow key: the
+    pages run from the right when the interface reads from the right."""
+    back = key in (Qt.Key_Left, Qt.Key_Up)
+    if key in (Qt.Key_Left, Qt.Key_Right) and widget.isRightToLeft():
+        back = not back
+    return -1 if back else 1
 
 
 class _PageDelegate(QStyledItemDelegate):
@@ -98,7 +107,7 @@ class PageGrid(QListWidget):
         k = e.key()
         if e.modifiers() & Qt.ControlModifier and self.move_requested is not None and k in (
                 Qt.Key_Left, Qt.Key_Up, Qt.Key_Right, Qt.Key_Down):
-            self.move_requested(-1 if k in (Qt.Key_Left, Qt.Key_Up) else 1)
+            self.move_requested(_step_of(self, k))
             return
         super().keyPressEvent(e)
 
@@ -114,7 +123,8 @@ class PagesEditor(EditorWindow):
     """accepted({"pages_order": [(index, rotation)...], "pages_mode": "save" | "extract"})"""
 
     def __init__(self, path: str, password: str | None = None):
-        super().__init__(os.path.basename(path), f"Glisse pour trier · {DELETE_KEY} pour enlever")
+        super().__init__(os.path.basename(path),
+                         tr("Glisse pour trier · {key} pour enlever", key=delete_key()))
         self.path, self.password = path, password
         self.grid = PageGrid()
         self.grid.move_requested = self.move_selection
@@ -123,18 +133,23 @@ class PagesEditor(EditorWindow):
         self.center.addWidget(self.grid)
 
         self.rot_left = self.chip("↺", checkable=False)
-        self.rot_left.setToolTip("Pivoter à gauche")
+        self.rot_left.setToolTip(tr("Pivoter à gauche"))
         self.rot_left.clicked.connect(lambda: self.rotate_selection(270))
         self.rot_right = self.chip("↻", checkable=False)
-        self.rot_right.setToolTip(f"Pivoter à droite ({MOD_KEY} + R)")
+        self.rot_right.setToolTip(tr("Pivoter à droite ({key} + R)", key=mod_key()))
         self.rot_right.clicked.connect(lambda: self.rotate_selection(90))
-        self.remove_btn = self.chip("Supprimer", checkable=False)
+        self.remove_btn = self.chip(tr("Supprimer"), checkable=False)
         self.remove_btn.clicked.connect(self.remove_selection)
-        self.left_btn = self.chip("‹", checkable=False)
-        self.left_btn.setToolTip(f"Vers le début ({MOD_KEY} + ←)")
+        # (the first page is on the right when the interface reads from the right)
+        back, forward = self.nav_arrows()
+        rtl = self.isRightToLeft()
+        self.left_btn = self.chip(back, checkable=False)
+        self.left_btn.setToolTip(tr("Vers le début ({key} + {arrow})", key=mod_key(),
+                                    arrow="→" if rtl else "←"))
         self.left_btn.clicked.connect(lambda: self.move_selection(-1))
-        self.right_btn = self.chip("›", checkable=False)
-        self.right_btn.setToolTip(f"Vers la fin ({MOD_KEY} + →)")
+        self.right_btn = self.chip(forward, checkable=False)
+        self.right_btn.setToolTip(tr("Vers la fin ({key} + {arrow})", key=mod_key(),
+                                     arrow="←" if rtl else "→"))
         self.right_btn.clicked.connect(lambda: self.move_selection(1))
         for w in (self.rot_left, self.rot_right, self.remove_btn, self.left_btn,
                   self.right_btn):
@@ -144,20 +159,20 @@ class PagesEditor(EditorWindow):
         self.count_label.setObjectName("hint")
         self.tools.addWidget(self.count_label)
 
-        self.extract_btn = QPushButton("Extraire la sélection")
+        self.extract_btn = QPushButton(tr("Extraire la sélection"))
         self.extract_btn.setObjectName("ghost")
-        self.extract_btn.setToolTip("Un nouveau PDF avec seulement les pages choisies")
+        self.extract_btn.setToolTip(tr("Un nouveau PDF avec seulement les pages choisies"))
         self.extract_btn.setFocusPolicy(Qt.NoFocus)
         self.extract_btn.clicked.connect(self.extract)
-        reset = QPushButton("Réinitialiser")
+        reset = QPushButton(tr("Réinitialiser"))
         reset.setObjectName("ghost")
         reset.setFocusPolicy(Qt.NoFocus)
         reset.clicked.connect(self._fill)
-        cancel = QPushButton("Annuler")
+        cancel = QPushButton(tr("Annuler"))
         cancel.setObjectName("ghost")
         cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
-        self.ok = QPushButton("Enregistrer")
+        self.ok = QPushButton(tr("Enregistrer"))
         self.ok.setObjectName("primary")
         self.ok.setFocusPolicy(Qt.NoFocus)
         self.ok.clicked.connect(self.validate)
@@ -258,8 +273,8 @@ class PagesEditor(EditorWindow):
         n = self.grid.count()
         sel = len(self.grid.selectedItems())
         self.count_label.setText(
-            f"{sel} sélectionnée{'s' if sel > 1 else ''} sur {n}" if sel
-            else f"{n} page{'s' if n > 1 else ''}")
+            trn("{n} sélectionnée sur {count}", "{n} sélectionnées sur {count}", sel, count=n)
+            if sel else trn("{n} page", "{n} pages", n))
         for w in (self.rot_left, self.rot_right, self.remove_btn, self.left_btn,
                   self.right_btn, self.extract_btn):
             w.setEnabled(sel > 0)
@@ -269,10 +284,9 @@ class PagesEditor(EditorWindow):
         k = e.key()
         if k in (Qt.Key_Delete, Qt.Key_Backspace):
             self.remove_selection()
-        elif e.modifiers() & Qt.ControlModifier and k in (Qt.Key_Left, Qt.Key_Up):
-            self.move_selection(-1)
-        elif e.modifiers() & Qt.ControlModifier and k in (Qt.Key_Right, Qt.Key_Down):
-            self.move_selection(1)
+        elif e.modifiers() & Qt.ControlModifier and k in (Qt.Key_Left, Qt.Key_Up,
+                                                          Qt.Key_Right, Qt.Key_Down):
+            self.move_selection(_step_of(self, k))
         elif e.modifiers() & Qt.ControlModifier and k == Qt.Key_R:
             self.rotate_selection(90)
         else:

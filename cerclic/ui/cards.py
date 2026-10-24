@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter
 from PySide6.QtWidgets import (QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout, QWidget)
 
+from ..i18n import tr, trc, trn
 from ..sizes import change, human, size_of
 from .theme import (ACCENT, ACCENT_STRONG, BORDER, BUTTON_QSS, ERROR, MUTED, OK, TEXT,
                     WARN, card_qss)
@@ -234,23 +235,40 @@ class MessageCard(Card):
 def _close_button(card: "Card") -> QPushButton:
     b = QPushButton("✕")
     b.setObjectName("closeCard")
-    b.setToolTip("Fermer")
+    b.setToolTip(tr("Fermer"))
     b.setFixedSize(26, 24)
     b.setFocusPolicy(Qt.NoFocus)
     b.clicked.connect(card.close)
     return b
 
 
-_KNOWN = {"desktop": "Bureau", "downloads": "Téléchargements", "pictures": "Images",
-          "videos": "Vidéos", "movies": "Vidéos", "music": "Musique",
-          "documents": "Documents"}
+def _known_folder(name: str) -> str | None:
+    """The name the file manager shows for a usual folder, in the language in
+    use (« Images » is here the folder, not the kind of file: hence a context;
+    the Mac calls its videos folder « Movies »)."""
+    key = name.lower()
+    if key == "desktop":
+        return trc("dossier", "Bureau")
+    if key == "downloads":
+        return trc("dossier", "Téléchargements")
+    if key == "pictures":
+        return trc("dossier", "Images")
+    if key == "videos":
+        return trc("dossier", "Vidéos")
+    if key == "movies":
+        return trc("dossier du Mac", "Vidéos")
+    if key == "music":
+        return trc("dossier", "Musique")
+    if key == "documents":
+        return trc("dossier", "Documents")
+    return None
 
 
 def folder_label(outputs: list[str]) -> str:
     """Where the results are, as the file manager names that folder."""
     d = os.path.dirname(os.path.abspath(outputs[0]))
     name = os.path.basename(d.rstrip("\\/")) or d
-    return _KNOWN.get(name.lower(), name)
+    return _known_folder(name) or name
 
 
 def _elided(label: QLabel, text: str, width: int) -> str:
@@ -270,15 +288,15 @@ class JobCard(Card):
         super().__init__(ACCENT_STRONG)
         self._title = title
         top = QHBoxLayout()
-        self._head = _head(title + "…")
+        self._head = _head(tr("{title}…", title=title))
         top.addWidget(self._head, 1)
-        self._stop = QPushButton("Arrêter")
+        self._stop = QPushButton(tr("Arrêter"))
         self._stop.setObjectName("ghost")
         self._stop.clicked.connect(self._on_stop)
         top.addWidget(self._stop)
         self._top = top
         self.body.addLayout(top)
-        self._status = _sub("En cours")
+        self._status = _sub(tr("En cours"))
         self.body.addWidget(self._status)
         self._bar = _Bar()
         self.body.addWidget(self._bar)
@@ -286,14 +304,15 @@ class JobCard(Card):
 
     def _on_stop(self):
         self._stop.setEnabled(False)
-        self._status.setText("Arrêt en cours…")
+        self._status.setText(tr("Arrêt en cours…"))
         self.cancel_requested.emit()
 
     def set_progress(self, fraction: float | None, text: str = "") -> None:
         self._bar.set_value(fraction)
         if text:
-            pct = f"  {int(round(fraction * 100))} %" if fraction is not None else ""
-            self._status.setText(text + pct)
+            if fraction is not None:
+                text += "  " + tr("{percent} %", percent=int(round(fraction * 100)))
+            self._status.setText(text)
 
     def finish(self, result, note: str = "") -> None:
         """Turn into the result card."""
@@ -309,8 +328,8 @@ class JobCard(Card):
             self._head.setText("✓  " + self._title)
             n = len(self._outputs)
             text = (_elided(self._status, os.path.basename(self._outputs[0]), 290)
-                    if n == 1 else f"{n} fichiers créés")
-            where = "\u00a0«\u00a0" + folder_label(self._outputs) + "\u00a0»"
+                    if n == 1 else trn("{n} fichier créé", "{n} fichiers créés", n))
+            folder = folder_label(self._outputs)
             # (sizes measured with the work, off the interface: a network drive
             # can be slow to answer)
             after = getattr(result, "bytes_after", 0) or size_of(self._outputs)
@@ -318,31 +337,38 @@ class JobCard(Card):
             if result.action_id.endswith("_compress") and sources:
                 # what the compression gained, the reason it was done
                 before = getattr(result, "bytes_before", 0) or size_of(sources)
-                text += "\n" + change(before, after) + "\nDans" + where
+                text += "\n" + change(before, after) + "\n" + tr(
+                    "Dans\u00a0«\u00a0{folder}\u00a0»", folder=folder)
+            elif after and n > 1:
+                text += "\n" + tr("{size} en tout · dans\u00a0«\u00a0{folder}\u00a0»",
+                                  size=human(after), folder=folder)
             elif after:
-                text += f"\n{human(after)}" + (" en tout" if n > 1 else "") + " · dans" + where
+                text += "\n" + tr("{size} · dans\u00a0«\u00a0{folder}\u00a0»",
+                                  size=human(after), folder=folder)
             else:
-                text += "\nDans" + where
+                text += "\n" + tr("Dans\u00a0«\u00a0{folder}\u00a0»", folder=folder)
             if n == 1 and not self._status.toolTip():
                 self._status.setToolTip(self._outputs[0])
             notes = list(getattr(result, "notes", []) or [])
             if len(notes) > 1:
-                note = (note + "\n" if note else "") + (
-                    f"{len(notes)} fichiers laissés de côté, par exemple : {notes[0]}")
+                note = (note + "\n" if note else "") + trn(
+                    "{n} fichier laissé de côté, par exemple : {example}",
+                    "{n} fichiers laissés de côté, par exemple : {example}",
+                    len(notes), example=notes[0])
             elif notes:
                 note = (note + "\n" if note else "") + notes[0]
             self._status.setText(text + (f"\n{note}" if note else ""))
             row = QHBoxLayout()
             row.setSpacing(8)
-            b_open = QPushButton("Ouvrir")
+            b_open = QPushButton(tr("Ouvrir"))
             b_open.setObjectName("primary")
             b_open.clicked.connect(self._open)
-            b_dir = QPushButton("Dossier")
+            b_dir = QPushButton(tr("Dossier"))
             b_dir.clicked.connect(self._reveal)
-            b_undo = QPushButton("Supprimer")
+            b_undo = QPushButton(tr("Supprimer"))
             b_undo.setObjectName("danger")
-            b_undo.setToolTip("Supprime ce que Cerclic vient de créer (ton fichier "
-                              "d'origine ne bouge pas)")
+            b_undo.setToolTip(tr("Supprime ce que Cerclic vient de créer (ton fichier "
+                                 "d'origine ne bouge pas)"))
             b_undo.clicked.connect(self._undo)
             row.addWidget(b_open)
             row.addWidget(b_dir)
@@ -356,7 +382,7 @@ class JobCard(Card):
         elif result.cancelled:
             self.set_accent(MUTED)
             self._head.setText(self._title)
-            self._status.setText("Arrêté : rien n'a été créé.")
+            self._status.setText(tr("Arrêté : rien n'a été créé."))
             self.start_auto_close(3500)
         elif result.info:
             self.set_accent(ACCENT_STRONG)
@@ -365,8 +391,8 @@ class JobCard(Card):
             self.start_auto_close(6000)
         else:
             self.set_accent(ERROR)
-            self._head.setText("✕  " + self._title + " impossible")
-            self._status.setText(result.error or "Erreur inconnue.")
+            self._head.setText("✕  " + tr("{title} impossible", title=self._title))
+            self._status.setText(result.error or tr("Erreur inconnue."))
             self.start_auto_close(12000)
         self.adjustSize()
 
@@ -388,9 +414,9 @@ class JobCard(Card):
         self._status.setToolTip("")
         if kept:                       # open in another app: say so, keep the buttons
             self.set_accent(WARN)
-            self._head.setText("Suppression impossible")
-            self._status.setText("Le fichier est sans doute ouvert dans une autre "
-                                 "application : ferme-la, puis réessaie.")
+            self._head.setText(tr("Suppression impossible"))
+            self._status.setText(tr("Le fichier est sans doute ouvert dans une autre "
+                                    "application : ferme-la, puis réessaie."))
             self._outputs = kept
             self.adjustSize()
             self.start_auto_close(8000)
@@ -399,8 +425,8 @@ class JobCard(Card):
             b.hide()
         self.set_accent(MUTED)
         n = len(self._outputs)
-        self._head.setText("Fichier supprimé" if n == 1 else "Fichiers supprimés")
-        self._status.setText("Ton fichier d'origine n'a pas bougé.")
+        self._head.setText(trn("Fichier supprimé", "Fichiers supprimés", n))
+        self._status.setText(tr("Ton fichier d'origine n'a pas bougé."))
         self._outputs = []
         self.adjustSize()
         self.start_auto_close(2500)

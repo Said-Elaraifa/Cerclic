@@ -25,6 +25,7 @@ from PySide6.QtGui import (QColor, QFontMetricsF, QGuiApplication, QImage,
 from PySide6.QtWidgets import QWidget
 
 from ..actions.registry import CATEGORIES, Action
+from ..i18n import tr, trn
 from ..paths import kind_of
 from ..win.foreground import bring_to_front
 from .dismiss import DismissGuard
@@ -190,30 +191,35 @@ class Wheel(QWidget):
     def _rebuild(self) -> None:
         level, payload = self._stack[-1]
         out: list[Slice] = []
+        # (the texts are translated here, when the wheel is built: it is made
+        # each time it opens, so it always speaks the language in use)
         if level == "categories":
             for cat_id in self._menu:
                 label, hexcol = CATEGORIES[cat_id]
+                label = tr(label)
                 n = self._counts.get(cat_id, 0)
-                out.append(Slice(cat_id, f"{label} ({n})" if n > 1 else label,
+                out.append(Slice(cat_id,
+                                 tr("{category} ({n})", category=label, n=n) if n > 1 else label,
                                  _category_icon(cat_id), QColor(hexcol), "category",
-                                 desc=f"{n} fichier{'s' if n > 1 else ''}"))
+                                 desc=trn("{n} fichier", "{n} fichiers", n)))
         elif level in ("actions", "more"):
             cat_id = payload
             _, hexcol = CATEGORIES[cat_id]
             col = QColor(hexcol)
             main, more = ring_split(self._menu.get(cat_id, []))
             for a in (more if level == "more" else main):
-                out.append(Slice(a.id, a.label, a.icon, col, "action", a, a.desc))
+                out.append(Slice(a.id, tr(a.label), a.icon, col, "action", a,
+                                 tr(a.desc) if a.desc else ""))
             if level == "actions" and more:
-                out.append(Slice("__more__", "Plus", "more", col, "more", cat_id,
-                                 "D'autres outils"))
+                out.append(Slice("__more__", tr("Plus"), "more", col, "more", cat_id,
+                                 tr("D'autres outils")))
         elif level == "choices":
             action: Action = payload
             _, hexcol = CATEGORIES[action.category]
             col = QColor(hexcol)
             for c in action.choices:
-                out.append(Slice(c.id, c.label, c.icon, col, "choice", (action, c),
-                                 action.label))
+                out.append(Slice(c.id, tr(c.label), c.icon, col, "choice", (action, c),
+                                 tr(action.label)))
         self._slices = out[:MAX_SLICES]
         self._glow = [0.0] * len(self._slices)
         self._hover = -1
@@ -236,11 +242,11 @@ class Wheel(QWidget):
     def _title(self) -> str:
         level, payload = self._stack[-1]
         if level == "more":
-            return "Plus"
+            return tr("Plus")
         if level == "choices":
-            return payload.label
+            return tr(payload.label)
         if level == "actions" and len(self._stack) > 1:
-            return CATEGORIES[payload][0]
+            return tr(CATEGORIES[payload][0])
         return ""
 
     # -- show / animation ------------------------------------------------------
@@ -470,7 +476,7 @@ class Wheel(QWidget):
             p.setPen(qcolor(TEXT if self._center_hover else MUTED))
             p.setFont(font(8.6))
             p.drawText(QRectF(c.x() - ri, c.y() + 2, 2 * ri, 20), Qt.AlignCenter,
-                       "‹ Retour")
+                       tr("‹ Retour"))
             return
         if self._thumb is not None:
             clip = QPainterPath()

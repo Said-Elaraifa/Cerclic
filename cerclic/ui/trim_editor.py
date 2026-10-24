@@ -13,9 +13,9 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
+from ..i18n import decimal, tr
 from ..paths import kind_of
-from .editor_base import EditorWindow, Loader, fit_view
-from ..system import ENTER_KEY
+from .editor_base import EditorWindow, Loader, enter_key, fit_view
 from .theme import MUTED, TEXT, base_font
 
 STRIP_FRAMES = 8
@@ -23,13 +23,14 @@ HANDLE_W = 10
 
 
 def fmt_time(t: float) -> str:
-    """1:05,3 or 1:02:05,3"""
+    """1:05,3 or 1:02:05,3 (the tenths after the decimal sign of the language)"""
     t = max(0.0, float(t))
     tenths = int(round(t * 10))
     s, d = divmod(tenths, 10)
     m, s = divmod(s, 60)
     h, m = divmod(m, 60)
-    return f"{h}:{m:02d}:{s:02d},{d}" if h else f"{m}:{s:02d},{d}"
+    sep = decimal(0.0, 1)[1]                     # « , » in French, « . » in English
+    return f"{h}:{m:02d}:{s:02d}{sep}{d}" if h else f"{m}:{s:02d}{sep}{d}"
 
 
 class TrimTrack(QWidget):
@@ -48,14 +49,14 @@ class TrimTrack(QWidget):
         self.color = QColor(color)
         self.strip: list[QImage | None] = []
         self.wave: QImage | None = None
-        self.message = "Chargement…"
+        self.message = tr("Chargement…")
         self._drag = None
         self._grab_dt = 0.0
 
     def set_duration(self, d: float) -> None:
         self.duration = max(0.0, d)
         self.start, self.end = 0.0, self.duration
-        self.message = "" if self.duration > 0 else "Durée inconnue"
+        self.message = "" if self.duration > 0 else tr("Durée inconnue")
         self.update()
 
     # -- mapping ---------------------------------------------------------------------
@@ -236,7 +237,8 @@ class _Frame(QWidget):
             f.setBold(True)
             p.setFont(f)
             tw = p.fontMetrics().horizontalAdvance(self.caption) + 16
-            box = QRectF(r.left() + 8, r.bottom() - 30, tw, 22)
+            x = r.right() - 8 - tw if self.isRightToLeft() else r.left() + 8
+            box = QRectF(x, r.bottom() - 30, tw, 22)
             p.setBrush(QColor(0, 0, 0, 150))
             p.drawRoundedRect(box, 6, 6)
             p.setPen(QColor("white"))
@@ -250,7 +252,7 @@ class TrimEditor(EditorWindow):
         self.path = path
         self.is_video = kind_of(path) == "video"
         super().__init__(os.path.basename(path),
-                         f"Tire les poignées · {ENTER_KEY} pour raccourcir")
+                         tr("Tire les poignées · {key} pour raccourcir", key=enter_key()))
         color = "#10A37F" if self.is_video else "#8B5CF6"
         self.frame = _Frame() if self.is_video else None
         if self.frame is not None:
@@ -269,11 +271,11 @@ class TrimEditor(EditorWindow):
         self.tools.addWidget(self.length_label)
 
         self.bar.addStretch(1)
-        cancel = QPushButton("Annuler")
+        cancel = QPushButton(tr("Annuler"))
         cancel.setObjectName("ghost")
         cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
-        self.ok = QPushButton("Raccourcir")
+        self.ok = QPushButton(tr("Raccourcir"))
         self.ok.setObjectName("primary")
         self.ok.setEnabled(False)
         self.ok.setFocusPolicy(Qt.NoFocus)
@@ -312,7 +314,7 @@ class TrimEditor(EditorWindow):
 
     def _probed(self, info, err) -> None:
         if err or info is None or info.duration <= 0:
-            self.track.message = err or "Durée illisible : fichier endommagé ?"
+            self.track.message = err or tr("Durée illisible : fichier endommagé ?")
             self.track.update()
             return
         if self.is_video and not info.has_video and info.has_audio:
@@ -381,12 +383,14 @@ class TrimEditor(EditorWindow):
     # -- frames ----------------------------------------------------------------------------
     def _changed(self, which: str) -> None:
         t = self.track
-        self.times.setText(f"{fmt_time(t.start)}  →  {fmt_time(t.end)}")
-        self.length_label.setText(f"Durée {fmt_time(t.end - t.start)}")
+        self.times.setText(tr("{start}  →  {end}", start=fmt_time(t.start),
+                              end=fmt_time(t.end)))
+        self.length_label.setText(tr("Durée {duration}", duration=fmt_time(t.end - t.start)))
         if self.frame is not None:
             self._frame_want = t.start if which == "start" else t.end
-            self.frame.caption = ("Début " if which == "start" else "Fin ") + \
-                fmt_time(self._frame_want)
+            at = fmt_time(self._frame_want)
+            self.frame.caption = (tr("Début {time}", time=at) if which == "start"
+                                  else tr("Fin {time}", time=at))
             self.frame.update()
             self._frame_timer.start()
 

@@ -13,9 +13,9 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QFileDialog, QLabel, QPushButton, QWidget
 
+from ..i18n import tr
 from ..settings import config_dir
-from .editor_base import EditorWindow, Loader, fit_view
-from ..system import ENTER_KEY
+from .editor_base import EditorWindow, Loader, enter_key, fit_view
 from .theme import MUTED, font
 
 INK = QColor(16, 32, 74)
@@ -73,7 +73,7 @@ def import_signature(src: str, dst: str) -> str:
         out.putalpha(alpha)
     box = out.getchannel("A").point(lambda a: 255 if a > 24 else 0).getbbox()
     if not box:
-        raise ValueError("Aucun trait de signature trouvé dans cette image.")
+        raise ValueError(tr("Aucun trait de signature trouvé dans cette image."))
     pad = 6
     box = (max(0, box[0] - pad), max(0, box[1] - pad),
            min(out.width, box[2] + pad), min(out.height, box[3] + pad))
@@ -150,7 +150,7 @@ class _Pad(QWidget):
         if not self.strokes:
             p.setPen(QColor(150, 152, 160))
             p.setFont(font(12))
-            p.drawText(a, Qt.AlignCenter, "Signe ici")
+            p.drawText(a, Qt.AlignCenter, tr("Signe ici"))
         pen = QPen(INK, PEN_W)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
@@ -193,26 +193,26 @@ class SignaturePad(EditorWindow):
     """accepted({"signature": path})"""
 
     def __init__(self):
-        super().__init__("Ta signature", "Gardée pour les prochaines fois")
+        super().__init__(tr("Ta signature"), tr("Gardée pour les prochaines fois"))
         self.pad = _Pad()
         self.pad.changed.connect(self._sync)
         self.center.addWidget(self.pad, 0, Qt.AlignCenter)
-        imp = QPushButton("Importer…")
+        imp = QPushButton(tr("Importer…"))
         imp.setObjectName("ghost")
-        imp.setToolTip("Une photo de ta signature sur papier blanc")
+        imp.setToolTip(tr("Une photo de ta signature sur papier blanc"))
         imp.setFocusPolicy(Qt.NoFocus)
         imp.clicked.connect(self._import)
-        clear = QPushButton("Effacer")
+        clear = QPushButton(tr("Effacer"))
         clear.setObjectName("danger")
         clear.setFocusPolicy(Qt.NoFocus)
         clear.clicked.connect(self.pad.clear)
         self.msg = QLabel("")
         self.msg.setObjectName("hint")
-        cancel = QPushButton("Annuler")
+        cancel = QPushButton(tr("Annuler"))
         cancel.setObjectName("ghost")
         cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
-        self.ok = QPushButton("Enregistrer")
+        self.ok = QPushButton(tr("Enregistrer"))
         self.ok.setObjectName("primary")
         self.ok.setFocusPolicy(Qt.NoFocus)
         self.ok.clicked.connect(self.validate)
@@ -233,8 +233,8 @@ class SignaturePad(EditorWindow):
         self.pause_dismiss(True)
         try:
             src, _ = QFileDialog.getOpenFileName(
-                self, "Choisir une image de ta signature", pictures_folder(),
-                "Images (*.png *.jpg *.jpeg *.webp *.heic *.bmp)")
+                self, tr("Choisir une image de ta signature"), pictures_folder(),
+                tr("Images ({patterns})", patterns="*.png *.jpg *.jpeg *.webp *.heic *.bmp"))
         finally:
             self.pause_dismiss(False)
         if not src:
@@ -244,7 +244,7 @@ class SignaturePad(EditorWindow):
             path = import_signature(src, signature_path())
         except Exception as exc:
             self.msg.setText(str(exc) if isinstance(exc, ValueError)
-                             else "Image illisible.")
+                             else tr("Image illisible."))
             return
         self.finish({"signature": path})
 
@@ -265,7 +265,7 @@ class _PlaceCanvas(QWidget):
         self.page_size = (1.0, 1.0)
         self.sig_img: QImage | None = None
         self.box = QRectF(0.6, 0.8, 0.28, 0.08)   # relative to the page
-        self.message = "Chargement…"
+        self.message = tr("Chargement…")
         self._mode = None
         self._press = QPointF()
         self._press_box = QRectF()
@@ -402,29 +402,31 @@ class SignPlacer(EditorWindow):
 
     def __init__(self, pdf_path: str, signature: str, password: str | None = None):
         super().__init__(os.path.basename(pdf_path),
-                         f"Glisse la signature · tire un coin · {ENTER_KEY} pour signer")
+                         tr("Glisse la signature · tire un coin · {key} pour signer",
+                            key=enter_key()))
         self.path, self.signature, self.password = pdf_path, signature, password
         self.canvas = _PlaceCanvas()
         self.canvas.double_clicked.connect(self.validate)
         self.center.addWidget(self.canvas, 0, Qt.AlignCenter)
         self._load_signature()
 
-        change = QPushButton("Changer")
+        change = QPushButton(tr("Changer"))
         change.setObjectName("ghost")
-        change.setToolTip("Dessiner ou importer une autre signature")
+        change.setToolTip(tr("Dessiner ou importer une autre signature"))
         change.setFocusPolicy(Qt.NoFocus)
         change.clicked.connect(self._change_signature)
-        self.prev_btn = self.chip("‹", checkable=False)
+        back, forward = self.nav_arrows()
+        self.prev_btn = self.chip(back, checkable=False)
         self.prev_btn.clicked.connect(lambda: self._goto(self.page - 1))
         self.page_label = QLabel("")
         self.page_label.setObjectName("hint")
-        self.next_btn = self.chip("›", checkable=False)
+        self.next_btn = self.chip(forward, checkable=False)
         self.next_btn.clicked.connect(lambda: self._goto(self.page + 1))
-        cancel = QPushButton("Annuler")
+        cancel = QPushButton(tr("Annuler"))
         cancel.setObjectName("ghost")
         cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
-        self.ok = QPushButton("Signer")
+        self.ok = QPushButton(tr("Signer"))
         self.ok.setObjectName("primary")
         self.ok.setEnabled(False)
         self.ok.setFocusPolicy(Qt.NoFocus)
@@ -473,7 +475,7 @@ class SignPlacer(EditorWindow):
         index = self.page if self.page >= 0 else 10 ** 6
         path, pw = self.path, self.password
         self.canvas.page_img = None
-        self.canvas.message = "Chargement…"
+        self.canvas.message = tr("Chargement…")
         self.canvas.update()
         self._loader.run(lambda: (token, load_pdf_preview(path, index, w, h, pw)))
 
@@ -518,7 +520,8 @@ class SignPlacer(EditorWindow):
 
     def _update_nav(self) -> None:
         index = self.page if self.page >= 0 else self.page_count - 1
-        self.page_label.setText(f"Page {index + 1} / {self.page_count}")
+        self.page_label.setText(tr("Page {page} / {count}", page=index + 1,
+                                   count=self.page_count))
         self.prev_btn.setEnabled(index > 0)
         self.next_btn.setEnabled(index < self.page_count - 1)
         many = self.page_count > 1
