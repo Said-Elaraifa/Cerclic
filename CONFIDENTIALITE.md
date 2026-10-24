@@ -16,7 +16,7 @@ dessiné ou importé une, et un journal technique servent uniquement au
 fonctionnement de l'application. Ils sont rangés dans le dossier de Cerclic sur
 ton ordinateur et disparaissent quand tu désinstalles Cerclic.
 
-Contact : https://github.com/Said-Elaraifa/Cerclic/issues
+Contact : contact@cerclic.com
 
 ---
 
@@ -38,4 +38,4 @@ drew or imported one, and a technical log are only used to run the app. They are
 kept in Cerclic's folder on your computer and are removed when you uninstall
 Cerclic.
 
-Contact: https://github.com/Said-Elaraifa/Cerclic/issues
+Contact: contact@cerclic.com
