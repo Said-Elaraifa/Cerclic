@@ -19,22 +19,28 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 from ..actions import social
+from ..i18n import N_, tr
 from ..paths import kind_of
-from ..system import ENTER_KEY
-from .editor_base import EditorWindow, Loader, _elide, qimage_from_pil
+from .editor_base import EditorWindow, Loader, _elide, enter_key, qimage_from_pil
 from .theme import MUTED, WARN, font
 
 MARGIN = 14                              # px around the frame: what gets cut shows there
 VEIL = QColor(240, 243, 249, 205)        # over what gets cut
 ZOOM_STEP = 1.15
+# (texts in French, translated where shown: tr(label), tr(tip))
 MODES = (
-    ("fill", "Remplir", "L'image couvre tout le cadre, ce qui dépasse est coupé.\n"
-                        "Glisse-la pour choisir la partie gardée, molette pour zoomer."),
-    ("blur", "Fond flou", "Toute l'image, rien n'est coupé.\n"
-                          "Autour : la même image, floutée."),
-    ("white", "Fond blanc", "Toute l'image, rien n'est coupé.\nAutour : du blanc."),
-    ("black", "Fond noir", "Toute l'image, rien n'est coupé.\nAutour : du noir."),
+    ("fill", N_("Remplir"), N_("L'image couvre tout le cadre, ce qui dépasse est coupé.\n"
+                               "Glisse-la pour choisir la partie gardée, molette pour zoomer.")),
+    ("blur", N_("Fond flou"), N_("Toute l'image, rien n'est coupé.\n"
+                                 "Autour : la même image, floutée.")),
+    ("white", N_("Fond blanc"), N_("Toute l'image, rien n'est coupé.\nAutour : du blanc.")),
+    ("black", N_("Fond noir"), N_("Toute l'image, rien n'est coupé.\nAutour : du noir.")),
 )
+
+
+def size_text(f: social.Format) -> str:
+    """« 1080 × 1350 px », in the language in use."""
+    return tr("{width} × {height} px", width=f.width, height=f.height)
 
 
 PREVIEW_PIXELS = 24_000_000       # at most, for a panorama shown whole
@@ -117,7 +123,7 @@ class SocialCanvas(QWidget):
         self.full = (1.0, 1.0)       # size of the original, as seen
         self.center = (0.5, 0.5)     # what the user asked for (kept inside when shown)
         self.zoom = 1.0
-        self.message = "Chargement…"
+        self.message = tr("Chargement…")
         self._blur: dict = {}
         self._scaled = (None, None)  # (size, the preview at that size): dragging only moves it
         self._press = None           # (mouse position, centre) while dragging
@@ -404,10 +410,10 @@ class SocialEditor(EditorWindow):
         dpr = self.dpr()
         self.format_buttons: dict[str, QPushButton] = {}
         for f in social.FORMATS:
-            b = self.chip(f"{f.label} {f.ratio}")
+            b = self.chip(tr("{format} {ratio}", format=tr(f.label), ratio=tr(f.ratio)))
             b.setIcon(shape_icon(f, dpr))
             b.setIconSize(QSize(16, 16))
-            b.setToolTip(f"{f.where}\n{f.size_text}")
+            b.setToolTip(tr(f.where) + "\n" + size_text(f))
             b.setChecked(f is fmt)
             b.clicked.connect(lambda _=False, ff=f: self.set_format(ff))
             self.tools.addWidget(b)
@@ -415,30 +421,31 @@ class SocialEditor(EditorWindow):
 
         self.mode_buttons: dict[str, QPushButton] = {}
         for key, label, tip in MODES:
-            b = self.chip(label)
-            b.setToolTip(tip)
+            b = self.chip(tr(label))
+            b.setToolTip(tr(tip))
             b.setChecked(key == mode)
             b.clicked.connect(lambda _=False, m=key: self.set_mode(m))
             self.bar.addWidget(b)
             self.mode_buttons[key] = b
         self.bar.addStretch(1)
-        self.prev_btn = self.chip("‹", checkable=False)
-        self.prev_btn.setToolTip("Fichier précédent")
+        back, forward = self.nav_arrows()
+        self.prev_btn = self.chip(back, checkable=False)
+        self.prev_btn.setToolTip(tr("Fichier précédent"))
         self.prev_btn.clicked.connect(lambda: self.goto(self.index - 1))
         self.count_label = QLabel("")
         self.count_label.setObjectName("hint")
-        self.next_btn = self.chip("›", checkable=False)
-        self.next_btn.setToolTip("Fichier suivant")
+        self.next_btn = self.chip(forward, checkable=False)
+        self.next_btn.setToolTip(tr("Fichier suivant"))
         self.next_btn.clicked.connect(lambda: self.goto(self.index + 1))
         for w in (self.prev_btn, self.count_label, self.next_btn):
             self.bar.addWidget(w)
             w.setVisible(len(self.paths) > 1)
         self.bar.addSpacing(4)
-        cancel = QPushButton("Annuler")
+        cancel = QPushButton(tr("Annuler"))
         cancel.setObjectName("ghost")
         cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
-        self.ok_btn = QPushButton("Créer")
+        self.ok_btn = QPushButton(tr("Créer"))
         self.ok_btn.setObjectName("primary")
         self.ok_btn.setEnabled(False)
         self.ok_btn.setFocusPolicy(Qt.NoFocus)
@@ -489,7 +496,7 @@ class SocialEditor(EditorWindow):
                     log_exception("aperçu réseaux")
                 return token, None, friendly_error(exc)
 
-        self.canvas.clear("Chargement…")
+        self.canvas.clear(tr("Chargement…"))
         self._loader.run(work)
 
     def _loaded(self, res, err) -> None:
@@ -535,7 +542,7 @@ class SocialEditor(EditorWindow):
 
     def _update_nav(self) -> None:
         n = len(self.paths)
-        self.count_label.setText(f"{self.index + 1} / {n}")
+        self.count_label.setText(tr("{index} / {count}", index=self.index + 1, count=n))
         self.prev_btn.setEnabled(self.index > 0)
         self.next_btn.setEnabled(self.index < n - 1)
 
@@ -543,17 +550,21 @@ class SocialEditor(EditorWindow):
         c = self.canvas
         f = c.fmt
         if c.mode == "fill":
-            self.hint_label.setText(f"Glisse et zoome · {ENTER_KEY} pour créer")
+            self.hint_label.setText(tr("Glisse et zoome · {key} pour créer", key=enter_key()))
         else:
-            self.hint_label.setText(f"Rien n'est coupé · {ENTER_KEY} pour créer")
-        text = f"<b>{f.size_text}</b> · {f.where}"
+            self.hint_label.setText(tr("Rien n'est coupé · {key} pour créer", key=enter_key()))
+        text = f"<b>{size_text(f)}</b> · {tr(f.where)}"
         if c.image is not None and social.enlarged(*c.full, f, c.mode, c.zoom):
             if c.mode == "fill":
-                what = "La partie gardée est plus petite"
+                warning = tr("La partie gardée est plus petite que le format : "
+                             "agrandie, elle sera un peu moins nette.")
+            elif self.is_video:
+                warning = tr("La vidéo est plus petite que le format : "
+                             "agrandie, elle sera un peu moins nette.")
             else:
-                what = "La vidéo est plus petite" if self.is_video else "L'image est plus petite"
-            text += (f"<br><span style='color:{WARN}'>{what} que le format : "
-                     "agrandie, elle sera un peu moins nette.</span>")
+                warning = tr("L'image est plus petite que le format : "
+                             "agrandie, elle sera un peu moins nette.")
+            text += f"<br><span style='color:{WARN}'>{warning}</span>"
         self.info.setText(text)
 
     # -- keyboard -------------------------------------------------------------------------------------

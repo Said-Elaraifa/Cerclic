@@ -25,28 +25,32 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxL
                                QWidget)
 
 from .. import sizes
+from ..i18n import N_, tr, trn
 from ..paths import ext_of
-from ..system import ENTER_KEY
-from .editor_base import EditorWindow, Loader, fit_view, qimage_from_pil
+from .editor_base import EditorWindow, Loader, enter_key, fit_view, qimage_from_pil
 from .glass import SLIDER_QSS
 from .theme import ACCENT, ACCENT_STRONG, BORDER, MUTED, OK, SURFACE_2, TEXT, WARN, font
 
+# (French texts, translated where they are shown: tr(LEVEL_LABELS[level]))
 LEVELS = ("light", "medium", "strong", "max")
-LEVEL_LABELS = {"light": "Légère", "medium": "Moyenne", "strong": "Forte", "max": "Maximale"}
+LEVEL_LABELS = {"light": N_("Légère"), "medium": N_("Moyenne"), "strong": N_("Forte"),
+                "max": N_("Maximale")}
 LEVEL_TIPS = {
-    "pdf": {"light": "Images à 220 ppp : très nettes, même imprimées",
-            "medium": "Images à 150 ppp : nettes à l'écran et à l'impression",
-            "strong": "Images à 110 ppp : pour l'écran",
-            "max": "Images à 80 ppp : le plus léger, images moins nettes"},
-    "video": {"light": "Jusqu'à 1080p, très bonne qualité",
-              "medium": "Jusqu'à 1080p, bonne qualité",
-              "strong": "720p : pour un téléphone ou un message",
-              "max": "480p : le plus léger"},
-    "audio": {"light": "MP3 192 kbit/s : musique, très bonne qualité",
-              "medium": "MP3 128 kbit/s : musique",
-              "strong": "MP3 96 kbit/s : voix, et musique sur un téléphone",
-              "max": "MP3 64 kbit/s : voix"},
+    "pdf": {"light": N_("Images à 220 ppp : très nettes, même imprimées"),
+            "medium": N_("Images à 150 ppp : nettes à l'écran et à l'impression"),
+            "strong": N_("Images à 110 ppp : pour l'écran"),
+            "max": N_("Images à 80 ppp : le plus léger, images moins nettes")},
+    "video": {"light": N_("Jusqu'à 1080p, très bonne qualité"),
+              "medium": N_("Jusqu'à 1080p, bonne qualité"),
+              "strong": N_("720p : pour un téléphone ou un message"),
+              "max": N_("480p : le plus léger")},
+    "audio": {"light": N_("MP3 192 kbit/s : musique, très bonne qualité"),
+              "medium": N_("MP3 128 kbit/s : musique"),
+              "strong": N_("MP3 96 kbit/s : voix, et musique sur un téléphone"),
+              "max": N_("MP3 64 kbit/s : voix")},
 }
+# Why a strength gives no size (kept as is in the results, shown translated).
+NO_GAIN, FAILED = "pas de gain", "impossible"
 DEFAULT_LEVEL = {"pdf": "medium", "video": "medium", "audio": "strong"}
 SAMPLE_PIXELS = 80_000_000      # pictures kept in memory to measure a batch
 SAMPLE_FILES = 3
@@ -123,7 +127,7 @@ def load_samples(paths: list[str]):
         samples.append((p, pic, usable[p]))
         pixels += pixels_of.get(p, 0)
     if not samples:
-        raise UserError("Image illisible ou format non pris en charge.")
+        raise UserError(tr("Image illisible ou format non pris en charge."))
     return samples, sum(usable.values()), len(usable)
 
 
@@ -175,10 +179,29 @@ def estimate_level(kind: str, path: str, level: str, workdir: str, cancel, opts:
         if res.info:
             raise NothingToDo(res.error)
         if not res.ok or not res.outputs:
-            raise UserError(res.error or "Compression impossible.")
+            raise UserError(res.error or tr("Compression impossible."))
         return os.path.getsize(res.outputs[0]), True, res.outputs[0]
     from ..actions import video
     return video.estimate_compressed(path, level, workdir, should_stop=cancel.is_set)
+
+
+def _quality_text(q: int, colors: int | None | bool = False) -> str:
+    """« 70 % », and for a PNG what it keeps: « 70 % · 256 couleurs » or
+    « 95 % · sans perte » (colors None)."""
+    if colors is False:
+        return tr("{percent} %", percent=q)
+    if colors is None:
+        return tr("{percent} % · sans perte", percent=q)
+    return trn("{percent} % · {n} couleur", "{percent} % · {n} couleurs", colors, percent=q)
+
+
+def _problem_text(problem: str, first_word: bool = False) -> str:
+    """Why a strength gives no size, in words (capitalised at the start of a line)."""
+    if problem == NO_GAIN:
+        return tr("Pas de gain") if first_word else tr("pas de gain")
+    if problem == FAILED:
+        return tr("Impossible") if first_word else tr("impossible")
+    return problem.capitalize() if first_word else problem
 
 
 class _Level(QPushButton):
@@ -194,8 +217,8 @@ class _Level(QPushButton):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 6, 10, 6)
         lay.setSpacing(1)
-        self.name = QLabel(LEVEL_LABELS[level])
-        self.size = QLabel("calcul…")
+        self.name = QLabel(tr(LEVEL_LABELS[level]))
+        self.size = QLabel(tr("calcul…"))
         for lbl in (self.name, self.size):
             lbl.setAlignment(Qt.AlignCenter)
             lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -222,7 +245,7 @@ class _Preview(QWidget):
         self.whole = None           # the result, every pixel (for the loupe)
         self.full = (1, 1)
         self.exact_pixels = True
-        self.message = "Chargement…"
+        self.message = tr("Chargement…")
         self._mouse: QPointF | None = None
 
     def set_result(self, image, whole, exact_pixels: bool = True) -> None:
@@ -268,11 +291,12 @@ class _Preview(QWidget):
             return
         m = self._mouse
         if m is None or not R.contains(m):
-            text = ("Survole l'image : détail à 100 %" if self.exact_pixels
-                    else "Survole l'image : détail")
+            text = (tr("Survole l'image : détail à 100 %") if self.exact_pixels
+                    else tr("Survole l'image : détail"))
             p.setFont(font(8.5, True))
             tw = p.fontMetrics().horizontalAdvance(text) + 16
-            pill = QRectF(R.left() + 8, R.bottom() - 30, tw, 22)
+            x = R.right() - 8 - tw if self.isRightToLeft() else R.left() + 8
+            pill = QRectF(x, R.bottom() - 30, tw, 22)
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(0, 0, 0, 140))
             p.drawRoundedRect(pill, 11, 11)
@@ -315,9 +339,11 @@ class CompressEditor(EditorWindow):
         self.kind = kind
         self.opts = dict(opts or {})          # passwords of protected PDF
         n = len(self.paths)
-        title = os.path.basename(self.paths[0]) if n == 1 else f"{n} fichiers"
-        hint = (f"Choisis la qualité · {ENTER_KEY} pour compresser" if kind == "image"
-                else f"Choisis la force · {ENTER_KEY} pour compresser")
+        title = (os.path.basename(self.paths[0]) if n == 1
+                 else trn("{n} fichier", "{n} fichiers", n))
+        hint = (tr("Choisis la qualité · {key} pour compresser", key=enter_key())
+                if kind == "image"
+                else tr("Choisis la force · {key} pour compresser", key=enter_key()))
         super().__init__(title, hint)
         self.originals = _sizes_of(self.paths)
         self.before = sum(self.originals.values())
@@ -338,7 +364,9 @@ class CompressEditor(EditorWindow):
         lay.addWidget(self.size_big)
         lay.addWidget(self.size_small)
         fm = self.size_small.fontMetrics()
-        box.setFixedWidth(fm.horizontalAdvance("au lieu de 999 Mo · 100 % de moins") + 24)
+        widest = tr("au lieu de {size} · {gain}", size=sizes.human(999 * sizes.BASE ** 2),
+                    gain=sizes.gain(100, 0))
+        box.setFixedWidth(fm.horizontalAdvance(widest) + 24)
         box.setMinimumHeight(self.size_big.sizeHint().height() + fm.lineSpacing() + 18)
 
         if kind == "image":
@@ -347,11 +375,11 @@ class CompressEditor(EditorWindow):
             self._build_levels(level, box)
 
         self.bar.addStretch(1)
-        cancel = QPushButton("Annuler")
+        cancel = QPushButton(tr("Annuler"))
         cancel.setObjectName("ghost")
         cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
-        self.ok_btn = QPushButton("Compresser")
+        self.ok_btn = QPushButton(tr("Compresser"))
         self.ok_btn.setObjectName("primary")
         self.ok_btn.setEnabled(False)
         self.ok_btn.setFocusPolicy(Qt.NoFocus)
@@ -377,12 +405,14 @@ class CompressEditor(EditorWindow):
         self.slider.setFocusPolicy(Qt.NoFocus)
         self.slider.setMinimumWidth(220)
         self.slider.valueChanged.connect(self._quality_moved)
-        name = QLabel("Qualité")
+        name = QLabel(tr("Qualité"))
         name.setStyleSheet(f"color:{TEXT};font-weight:700;font-size:12px;")
         self.q_label = QLabel("")
         self.q_label.setStyleSheet(f"color:{TEXT};font-size:12px;font-weight:600;")
-        widest = "95 % · 256 couleurs" if ext_of(self.paths[0]) == ".png" else "100 %"
-        self.q_label.setMinimumWidth(self.q_label.fontMetrics().horizontalAdvance(widest) + 4)
+        widest = ([_quality_text(95, 256), _quality_text(95, None)]
+                  if ext_of(self.paths[0]) == ".png" else [_quality_text(100)])
+        fm = self.q_label.fontMetrics()
+        self.q_label.setMinimumWidth(max(fm.horizontalAdvance(t) for t in widest) + 4)
         row = QHBoxLayout()
         row.setSpacing(10)
         row.addWidget(name)
@@ -412,14 +442,13 @@ class CompressEditor(EditorWindow):
     def _show_quality(self) -> None:
         q = self.slider.value()
         if self.gif_only:
-            self.q_label.setText("GIF : sans réglage")
+            self.q_label.setText(tr("GIF : sans réglage"))
             return
-        text = f"{q} %"
         if ext_of(self.paths[0]) == ".png":
             from ..actions.images import png_colors
-            colors = png_colors(q)
-            text += " · sans perte" if colors is None else f" · {colors} couleurs"
-        self.q_label.setText(text)
+            self.q_label.setText(_quality_text(q, png_colors(q)))
+        else:
+            self.q_label.setText(_quality_text(q))
 
     def _quality_moved(self, _value: int) -> None:
         self._show_quality()
@@ -475,11 +504,17 @@ class CompressEditor(EditorWindow):
         self._count = usable
         if len(self.paths) > 1:
             left = len(self.paths) - usable
-            self.batch_note.setText(
-                f"Aperçu : {os.path.basename(samples[0][0])} · total pour {usable} "
-                f"image{'s' if usable > 1 else ''}"
-                + (f", estimé sur {len(samples)}" if len(samples) < usable else "")
-                + (f" · {left} laissée{'s' if left > 1 else ''} de côté" if left else ""))
+            name = os.path.basename(samples[0][0])
+            if len(samples) < usable:
+                note = trn("Aperçu : {name} · total pour {n} image, estimé sur {sampled}",
+                           "Aperçu : {name} · total pour {n} images, estimé sur {sampled}",
+                           usable, name=name, sampled=len(samples))
+            else:
+                note = trn("Aperçu : {name} · total pour {n} image",
+                           "Aperçu : {name} · total pour {n} images", usable, name=name)
+            if left:
+                note += " · " + trn("{n} laissée de côté", "{n} laissées de côté", left)
+            self.batch_note.setText(note)
         self._want = self.slider.value()
         self._measure()
 
@@ -487,14 +522,14 @@ class CompressEditor(EditorWindow):
     def _build_levels(self, level: str | None, size_box) -> None:
         self.level = level if level in LEVELS else DEFAULT_LEVEL.get(self.kind, "medium")
         tips = LEVEL_TIPS.get(self.kind, LEVEL_TIPS["video"])
-        title = QLabel("Compression")
+        title = QLabel(tr("Compression"))
         title.setStyleSheet(f"color:{TEXT};font-weight:700;font-size:12px;")
         self.center.addWidget(title)
         row = QHBoxLayout()
         row.setSpacing(8)
         self.level_buttons: dict[str, _Level] = {}
         for lv in LEVELS:
-            b = _Level(lv, tips[lv])
+            b = _Level(lv, tr(tips[lv]))
             b.setChecked(lv == self.level)
             b.clicked.connect(lambda _=False, x=lv: self.set_level(x))
             row.addWidget(b)
@@ -519,7 +554,7 @@ class CompressEditor(EditorWindow):
         self.results[level] = (size, exact, made, problem)
         b = self.level_buttons[level]
         if problem:
-            b.size.setText(problem)
+            b.size.setText(_problem_text(problem))
         else:
             after = self._scaled(size)
             b.size.setText(("" if exact and len(self.paths) == 1 else "≈ ") + sizes.human(after))
@@ -536,19 +571,20 @@ class CompressEditor(EditorWindow):
         got = self.results.get(self.level)
         if got is None:
             self.after = None
-            self.size_big.setText("calcul…")
+            self.size_big.setText(tr("calcul…"))
             self.size_big.setStyleSheet(f"color:{MUTED};font-size:20px;font-weight:800;")
-            self.size_small.setText(LEVEL_TIPS.get(self.kind, {}).get(self.level, ""))
+            tip = LEVEL_TIPS.get(self.kind, {}).get(self.level, "")
+            self.size_small.setText(tr(tip) if tip else "")
             self.ok_btn.setEnabled(True)            # no need to wait to compress
             return
         size, exact, _, problem = got
         if problem:
             self.after = None
-            self.size_big.setText(problem.capitalize())
+            self.size_big.setText(_problem_text(problem, first_word=True))
             self.size_big.setStyleSheet(f"color:{WARN};font-size:16px;font-weight:800;")
-            self.size_small.setText("Essaie une compression plus forte."
-                                    if problem == "pas de gain" else "")
-            self.ok_btn.setEnabled(problem != "pas de gain")
+            self.size_small.setText(tr("Essaie une compression plus forte.")
+                                    if problem == NO_GAIN else "")
+            self.ok_btn.setEnabled(problem != NO_GAIN)
             return
         self.after = self._scaled(size)
         self.exact = exact and len(self.paths) == 1
@@ -560,17 +596,18 @@ class CompressEditor(EditorWindow):
         self.size_big.setText(approx + sizes.human(self.after))
         if gained:
             self.size_big.setStyleSheet(f"color:{TEXT};font-size:20px;font-weight:800;")
-            self.size_small.setText(
-                f"au lieu de {sizes.human(self.before)} · "
-                f"<span style='color:{OK};font-weight:700'>"
-                f"{sizes.gain(self.before, self.after)}</span>")
+            gain = (f"<span style='color:{OK};font-weight:700'>"
+                    f"{sizes.gain(self.before, self.after)}</span>")
+            self.size_small.setText(tr("au lieu de {size} · {gain}",
+                                       size=sizes.human(self.before), gain=gain))
             self.ok_btn.setEnabled(True)
         else:
-            self.size_big.setText("Pas plus léger")
+            self.size_big.setText(tr("Pas plus léger"))
             self.size_big.setStyleSheet(f"color:{WARN};font-size:20px;font-weight:800;")
-            self.size_small.setText(f"Original : {sizes.human(self.before)} · "
-                                    + ("baisse la qualité" if self.kind == "image"
-                                       else "compresse plus fort"))
+            before = sizes.human(self.before)
+            self.size_small.setText(
+                tr("Original : {size} · baisse la qualité", size=before) if self.kind == "image"
+                else tr("Original : {size} · compresse plus fort", size=before))
             self.ok_btn.setEnabled(False)
 
     # -- opening -------------------------------------------------------------------------------------
@@ -587,7 +624,7 @@ class CompressEditor(EditorWindow):
             vw, vh = fit_view(w, h, room_w, room_h - 60, min_side=280,
                               max_scale=1.0 / self.dpr())
             self.preview.setFixedSize(QSize(vw, vh))
-            self.size_big.setText("calcul…")
+            self.size_big.setText(tr("calcul…"))
             self.size_big.setStyleSheet(f"color:{MUTED};font-size:20px;font-weight:800;")
             self.open_at()
             paths = list(self.paths)
@@ -633,7 +670,7 @@ class CompressEditor(EditorWindow):
                         pass
                     return
                 except NothingToDo:
-                    report((level, None, False, None, "pas de gain"))
+                    report((level, None, False, None, NO_GAIN))
                 except Exception as exc:
                     from ..errors import UserError
                     from ..log import log, log_exception
@@ -641,7 +678,7 @@ class CompressEditor(EditorWindow):
                         log(f"estimation de compression ({level}) : {exc}")
                     else:
                         log_exception(f"estimation de compression ({level})")
-                    report((level, None, False, None, "impossible"))
+                    report((level, None, False, None, FAILED))
         self._levels_loader.run_reporting(work)
 
     # -- keyboard -------------------------------------------------------------------------------------

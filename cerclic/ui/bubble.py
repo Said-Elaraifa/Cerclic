@@ -11,6 +11,7 @@ from PySide6.QtGui import QAction, QColor, QGuiApplication, QIcon, QPainter, QPi
 from PySide6.QtWidgets import (QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
                                QLineEdit, QPushButton, QVBoxLayout, QWidget)
 
+from ..i18n import tr
 from ..win.foreground import bring_to_front
 from .dismiss import DismissGuard
 from .theme import BUTTON_QSS, INPUT_QSS, MUTED, TEXT, card_qss
@@ -33,7 +34,7 @@ class PromptBubble(QWidget):
     cancelled = Signal()
 
     def __init__(self, title: str, subtitle: str = "", password: bool = False,
-                 default: str = "", ok_label: str = "OK", allow_empty: bool = False):
+                 default: str = "", ok_label: str = "", allow_empty: bool = False):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool
                          | Qt.WindowStaysOnTopHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -68,7 +69,7 @@ class PromptBubble(QWidget):
         if password:
             self.edit.setEchoMode(QLineEdit.Password)
             # show / hide the password, inside the field (the typing stays there)
-            self.eye = QAction(_glyph_icon("eye"), "Afficher le mot de passe", self.edit)
+            self.eye = QAction(_glyph_icon("eye"), tr("Afficher le mot de passe"), self.edit)
             self.eye.setCheckable(True)
             self.eye.toggled.connect(self._toggle_echo)
             self.edit.addAction(self.eye, QLineEdit.TrailingPosition)
@@ -80,11 +81,11 @@ class PromptBubble(QWidget):
         row = QHBoxLayout()
         row.setSpacing(8)
         row.addStretch(1)
-        cancel = QPushButton("Annuler")
+        cancel = QPushButton(tr("Annuler"))
         cancel.setObjectName("ghost")
         cancel.setFocusPolicy(Qt.NoFocus)
         cancel.clicked.connect(self.cancel)
-        self.ok = QPushButton(ok_label)
+        self.ok = QPushButton(ok_label or tr("OK"))
         self.ok.setObjectName("primary")
         self.ok.setFocusPolicy(Qt.NoFocus)
         self.ok.clicked.connect(self._accept)
@@ -108,7 +109,7 @@ class PromptBubble(QWidget):
     def _toggle_echo(self, on: bool) -> None:
         self.edit.setEchoMode(QLineEdit.Normal if on else QLineEdit.Password)
         self.eye.setIcon(_glyph_icon("eye_off" if on else "eye"))
-        self.eye.setText("Masquer le mot de passe" if on else "Afficher le mot de passe")
+        self.eye.setText(tr("Masquer le mot de passe") if on else tr("Afficher le mot de passe"))
 
     def _sync(self) -> None:
         self.ok.setEnabled(self._allow_empty or bool(self.edit.text().strip()))
