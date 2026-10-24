@@ -277,6 +277,18 @@ def take_open_list(argv: list[str]) -> tuple[list[str], list[str] | None]:
     return rest, files
 
 
+def apply_language() -> str:
+    """The language chosen in the settings (« auto »: the computer's), in use
+    before any text is shown, even before Qt exists."""
+    from . import i18n
+    try:
+        from .settings import Settings
+        choice = Settings.load().get("language")
+    except Exception:
+        choice = "auto"
+    return i18n.set_language(choice)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     argv, listed = take_open_list(argv)
@@ -319,5 +331,6 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
         return 1
 
+    apply_language()                    # the resident Cerclic speaks it from the start
     from .app import run_resident
     return run_resident(cmd, paths, lock)

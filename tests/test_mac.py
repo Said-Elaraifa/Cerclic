@@ -195,8 +195,6 @@ def test_settings_window_as_on_a_mac(qtbot, monkeypatch, tmp_path):
     assert settings_mod.config_dir() == os.path.join(str(tmp_path), "Library",
                                                      "Application Support", "Cerclic")
     monkeypatch.setattr(sw, "IS_MAC", True)
-    monkeypatch.setattr(sw, "OS_NAME", "macOS")
-    monkeypatch.setattr(sw, "FILES_APP", "le Finder")
     monkeypatch.setattr(sw, "hk", mk)
     s = settings_mod.Settings()
     s.set("hotkey_mods", mk.DEFAULT_MODS)

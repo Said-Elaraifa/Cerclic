@@ -2,7 +2,9 @@
 sidebar items and the setting rows of Cerclic's window.
 
 Everything is painted (no images, no platform blur), so it looks the same on
-Windows and macOS and never depends on a graphics driver.
+Windows and macOS and never depends on a graphics driver. In a right-to-left
+language (Arabic) the painted parts are mirrored too (`mirrored`). The texts
+come translated from the caller.
 """
 from __future__ import annotations
 
@@ -10,12 +12,13 @@ from PySide6.QtCore import (QEasingCurve, QPointF, QRectF, QSize, Qt,
                             QVariantAnimation, Signal)
 from PySide6.QtGui import (QColor, QLinearGradient, QPainter, QPainterPath, QPen,
                            QPixmap, QRadialGradient)
-from PySide6.QtWidgets import (QAbstractButton, QCheckBox, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QAbstractButton, QCheckBox, QComboBox, QHBoxLayout, QLabel,
                                QSizePolicy, QVBoxLayout, QWidget)
 
+from .. import i18n
 from .icons import draw_icon
-from .theme import (ACCENT, ACCENT_SOFT, BORDER, FAINT, MUTED, OUTLINE, TEXT, TEXT_SOFT,
-                    font)
+from .theme import (ACCENT, ACCENT_SOFT, BORDER, FAINT, HOVER, MUTED, OUTLINE, SURFACE, TEXT,
+                    TEXT_SOFT, font)
 
 # soft colour clouds behind the glass: (x, y as fractions, radius, colour)
 _BLOBS = [(0.08, 0.10, 0.55, QColor(120, 176, 255, 120)),
@@ -86,6 +89,17 @@ class Backdrop(QWidget):
             self._cache = pix
         p = QPainter(self)
         p.drawPixmap(0, 0, self._cache)
+
+
+def rtl(w: QWidget) -> bool:
+    return w.layoutDirection() == Qt.RightToLeft
+
+
+def mirrored(w: QWidget, r: QRectF) -> QRectF:
+    """r as drawn in a right-to-left window: flipped from left to right."""
+    if not rtl(w):
+        return r
+    return QRectF(w.width() - r.right(), r.top(), r.width(), r.height())
 
 
 class GlassPanel(QWidget):
@@ -190,7 +204,7 @@ class Toggle(KeyboardFocus, QCheckBox):
         if self.show_focus():
             focus_ring(p, r, h / 2)
         d = h - 4
-        x = r.left() + 2 + (w - d - 4) * t
+        x = r.left() + 2 + (w - d - 4) * ((1.0 - t) if rtl(self) else t)
         knob = QRectF(x, r.top() + 2, d, d)
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(20, 40, 80, 45))
@@ -237,13 +251,14 @@ class NavItem(KeyboardFocus, QAbstractButton):
             p.drawRoundedRect(r, 10, 10)
             p.setPen(Qt.NoPen)                    # the page shown, readable from afar
             p.setBrush(QColor(ACCENT))
-            p.drawRoundedRect(QRectF(r.left() + 1, r.center().y() - 8, 3, 16), 1.5, 1.5)
+            p.drawRoundedRect(mirrored(self, QRectF(r.left() + 1, r.center().y() - 8, 3, 16)),
+                              1.5, 1.5)
         elif self._hover:
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(255, 255, 255, 120))
             p.drawRoundedRect(r, 10, 10)
         # a small coloured tile with the glyph, like system settings
-        tile = QRectF(r.left() + 8, r.center().y() - 12, 24, 24)
+        tile = mirrored(self, QRectF(r.left() + 8, r.center().y() - 12, 24, 24))
         g = QLinearGradient(tile.topLeft(), tile.bottomLeft())
         g.setColorAt(0.0, self.color.lighter(118))
         g.setColorAt(1.0, self.color)
@@ -253,7 +268,7 @@ class NavItem(KeyboardFocus, QAbstractButton):
         draw_icon(p, self.glyph, tile.center().x(), tile.center().y(), 15, QColor("white"))
         p.setPen(QColor(TEXT))
         p.setFont(font(10, bold=self.isChecked()))
-        p.drawText(QRectF(tile.right() + 10, r.top(), r.width() - 44, r.height()),
+        p.drawText(mirrored(self, QRectF(r.left() + 42, r.top(), r.width() - 44, r.height())),
                    Qt.AlignVCenter | Qt.AlignLeft, self.text())
         if self.show_focus():
             focus_ring(p, r, 10)
@@ -270,7 +285,9 @@ def focus_ring(p: QPainter, rect: QRectF, radius: float) -> None:
 
 def french(text: str) -> str:
     """Non-breaking spaces where French typography wants them, so a line never
-    starts with « : » or a lone guillemet."""
+    starts with « : » or a lone guillemet (in French only)."""
+    if i18n.current() != "fr":
+        return text
     for a, b in (("« ", "«\u00a0"), (" »", "\u00a0»"), (" :", "\u00a0:"),
                  (" ?", "\u00a0?"), (" !", "\u00a0!"), (" ;", "\u00a0;")):
         text = text.replace(a, b)
@@ -399,7 +416,7 @@ class Choice(KeyboardFocus, QAbstractButton):
         p.setPen(QPen(QColor(ACCENT) if on else QColor(BORDER), 1.6 if on else 1))
         p.setBrush(QColor(ACCENT_SOFT) if on else QColor(255, 255, 255, 200))
         p.drawRoundedRect(r, 12, 12)
-        dot = QPointF(r.left() + 20, r.center().y())
+        dot = mirrored(self, QRectF(r.left() + 20, r.center().y(), 0, 0)).topLeft()
         p.setPen(QPen(QColor(ACCENT) if on else QColor(OUTLINE), 1.6))
         p.setBrush(QColor("white"))
         p.drawEllipse(dot, 8, 8)
@@ -409,14 +426,74 @@ class Choice(KeyboardFocus, QAbstractButton):
             p.drawEllipse(dot, 4.5, 4.5)
         p.setPen(QColor(TEXT))
         p.setFont(font(10, bold=True))
-        p.drawText(QRectF(r.left() + 38, r.top() + 9, r.width() - 46, 20),
+        p.drawText(mirrored(self, QRectF(r.left() + 38, r.top() + 9, r.width() - 46, 20)),
                    Qt.AlignLeft | Qt.AlignVCenter, self.text())
         p.setPen(QColor(MUTED))
         p.setFont(font(9))
-        p.drawText(QRectF(r.left() + 38, r.top() + 29, r.width() - 46, 20),
+        p.drawText(mirrored(self, QRectF(r.left() + 38, r.top() + 29, r.width() - 46, 20)),
                    Qt.AlignLeft | Qt.AlignVCenter, self.desc)
         if self.show_focus():
             focus_ring(p, r, 12)
+
+
+def _select_qss(right_to_left: bool) -> str:
+    """Room for the chevron on the side the text runs to."""
+    right, left = ("12px", "34px") if right_to_left else ("34px", "12px")
+    return (
+        f"QComboBox{{background:{SURFACE};color:{TEXT};border:1px solid {BORDER};"
+        f"border-radius:9px;padding:6px {right} 6px {left};font-weight:600;min-height:20px;}}"
+        "QComboBox:hover{background:#F7F9FD;border-color:#C9D2E1;}"
+        f"QComboBox:focus{{border:2px solid {ACCENT};padding:5px {right} 5px {left};}}"
+        f"QComboBox:disabled{{color:{FAINT};}}"
+        "QComboBox::drop-down{border:none;width:0;}"
+        "QComboBox::down-arrow{image:none;width:0;height:0;}"
+        f"QComboBox QAbstractItemView{{background:{SURFACE};color:{TEXT};"
+        f"border:1px solid {BORDER};padding:4px;outline:0;font-weight:400;"
+        f"selection-background-color:{ACCENT_SOFT};selection-color:{TEXT};}}"
+        "QComboBox QAbstractItemView::item{min-height:28px;padding:0 10px;border-radius:6px;}"
+        f"QComboBox QAbstractItemView::item:hover{{background:{HOVER};}}"
+    )
+
+
+class Select(QComboBox):
+    """A drop-down list on the glass, drawn like the buttons (white, rounded,
+    a fine edge) with a small chevron. The mouse wheel scrolls the page, never
+    the choice, and the arrow keys open the list: a choice applies only once
+    picked (it may rebuild the whole window)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.TabFocus)              # a click leaves no focus ring
+        self.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.setMaxVisibleItems(12)
+        self._restyle()
+
+    def _restyle(self) -> None:
+        self.setStyleSheet(_select_qss(rtl(self)))
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() == e.Type.LayoutDirectionChange:
+            self._restyle()
+
+    def wheelEvent(self, e):
+        e.ignore()                                    # the page scrolls instead
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter):
+            self.showPopup()
+            return
+        super().keyPressEvent(e)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        x = 18.0 if rtl(self) else self.width() - 18.0
+        p.translate(x, self.height() / 2)
+        p.rotate(90)                                  # the chevron points down
+        draw_icon(p, "chevron", 0, 0, 11, QColor(MUTED if self.isEnabled() else FAINT))
 
 
 SLIDER_QSS = (
