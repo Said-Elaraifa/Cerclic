@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["CERCLIC_LANG"] = "fr"        # the tests read the French texts
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pymupdf  # noqa: E402
