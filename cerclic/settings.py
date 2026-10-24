@@ -27,6 +27,7 @@ DEFAULTS: dict = {
     "social_last": {},          # format and background last chosen: {"image": [...], "video": [...]}
     "compress_levels": {},      # strength last chosen to compress: {"pdf": "medium", ...}
     "welcome_shown": False,
+    "language": "auto",         # "auto" (the computer's) or a code of i18n.LANGS
 }
 # Keys from older versions (gesture, hold_ms...) are dropped on load.
 

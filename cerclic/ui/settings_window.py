@@ -4,7 +4,8 @@ A sidebar of sections (Général, Raccourci clavier, Clic droit, Fichiers créé
 Signature, Qualité, À propos) and, for each, rows on frosted glass: what the
 setting does on the left, its switch or button on the right. It opens when
 Cerclic is launched from its icon (Desktop, Start menu, Applications) or from
-the tray icon. Every change applies at once; there is nothing to save.
+the tray icon. Every change applies at once; there is nothing to save. A new
+language makes the app build the window again in it (app.py).
 """
 from __future__ import annotations
 
@@ -18,11 +19,12 @@ from PySide6.QtWidgets import (QButtonGroup, QFileDialog, QFrame, QHBoxLayout,
                                QLabel, QPushButton, QScrollArea, QSlider,
                                QStackedWidget, QVBoxLayout, QWidget)
 
-from .. import __version__
+from .. import __version__, i18n
+from ..i18n import N_, tr
 from ..settings import Settings
-from ..system import ENTER_KEY, FILES_APP, IS_MAC, OS_NAME, hotkeys
+from ..system import ENTER_KEY, IS_MAC, hotkeys
 from .glass import (SLIDER_QSS, Backdrop, Choice, GlassPanel, Group, KeyboardFocus,
-                    NavItem, Row, Toggle, focus_ring, group_block, label)
+                    NavItem, Row, Select, Toggle, focus_ring, group_block, label, mirrored)
 from .theme import (ACCENT, BUTTON_QSS, ERROR, FOCUS_QSS, MUTED, OK, SCROLL_QSS, TEXT,
                     base_font)
 
@@ -159,10 +161,10 @@ class ShortcutEdit(QWidget):
         row.setSpacing(8)
         self.caps = KeyCaps()
         row.addWidget(self.caps, 1)
-        self.change_btn = QPushButton("Modifier")
+        self.change_btn = QPushButton(tr("Modifier"))
         self.change_btn.setFocusPolicy(Qt.TabFocus)     # a click keeps the recording focused
         self.change_btn.clicked.connect(self.toggle_recording)
-        self.default_btn = QPushButton("Par défaut")
+        self.default_btn = QPushButton(tr("Par défaut"))
         self.default_btn.setObjectName("ghost")
         self.default_btn.setFocusPolicy(Qt.TabFocus)
         self.default_btn.clicked.connect(self._default)
@@ -192,18 +194,19 @@ class ShortcutEdit(QWidget):
 
     def toggle_recording(self) -> None:
         if self.recording:
-            self.stop_recording("Raccourci inchangé.")
+            self.stop_recording(tr("Raccourci inchangé."))
         else:
             self.start_recording()
 
     def start_recording(self) -> None:
         self.recording = True
-        self.change_btn.setText("Annuler")
+        self.change_btn.setText(tr("Annuler"))
         self.caps.active = True
-        self.caps.set_parts([], "Appuie sur ta combinaison…")
-        self.set_status(("Exemples : Maj + Cmd + Espace, Ctrl + Option + X. " if IS_MAC
-                         else "Exemples : Ctrl + Alt + Espace, Ctrl + Maj + X, Win + Maj + C. ")
-                        + "Échap pour annuler.", "accent")
+        self.caps.set_parts([], tr("Appuie sur ta combinaison…"))
+        self.set_status(tr("Exemples : Maj + Cmd + Espace, Ctrl + Option + X. Échap pour "
+                           "annuler.") if IS_MAC
+                        else tr("Exemples : Ctrl + Alt + Espace, Ctrl + Maj + X, "
+                                "Win + Maj + C. Échap pour annuler."), "accent")
         self.setFocus(Qt.OtherFocusReason)
         self.grabKeyboard()
         self.capturing.emit(True)
@@ -213,7 +216,7 @@ class ShortcutEdit(QWidget):
             return
         self.recording = False
         self.releaseKeyboard()
-        self.change_btn.setText("Modifier")
+        self.change_btn.setText(tr("Modifier"))
         self._show_combo()
         if message:
             self.set_status(message, "muted")
@@ -225,10 +228,10 @@ class ShortcutEdit(QWidget):
         if was_recording:
             self.recording = False
             self.releaseKeyboard()
-            self.change_btn.setText("Modifier")
+            self.change_btn.setText(tr("Modifier"))
         self.mods, self.vk = hk.DEFAULT_MODS, hk.DEFAULT_VK
         self._show_combo()
-        self.set_status("Vérification…", "muted")
+        self.set_status(tr("Vérification…"), "muted")
         self.chosen.emit(hk.DEFAULT_MODS, hk.DEFAULT_VK)
         if was_recording:
             self.capturing.emit(False)
@@ -238,12 +241,12 @@ class ShortcutEdit(QWidget):
             return super().keyPressEvent(e)
         mods, vk = combo_from_event(e)
         if vk == hk.VK_ESCAPE and not mods:
-            self.stop_recording("Raccourci inchangé.")
+            self.stop_recording(tr("Raccourci inchangé."))
             return
         if not vk:
             parts = hk.label(mods, 0).split(" + ")[:-1] if mods else []
             self.caps.set_parts(parts + ["…"] if parts else [],
-                                "Appuie sur ta combinaison…")
+                                tr("Appuie sur ta combinaison…"))
             return
         problem = hk.check(mods, vk)
         if problem:
@@ -253,9 +256,9 @@ class ShortcutEdit(QWidget):
         self.mods, self.vk = mods, vk
         self.recording = False
         self.releaseKeyboard()
-        self.change_btn.setText("Modifier")
+        self.change_btn.setText(tr("Modifier"))
         self._show_combo()
-        self.set_status("Vérification…", "muted")
+        self.set_status(tr("Vérification…"), "muted")
         self.chosen.emit(mods, vk)          # saved first: then the pause ends
         self.capturing.emit(False)
 
@@ -264,7 +267,7 @@ class ShortcutEdit(QWidget):
             m = e.modifiers()
             if not (m & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier
                          | Qt.MetaModifier)):
-                self.caps.set_parts([], "Appuie sur ta combinaison…")
+                self.caps.set_parts([], tr("Appuie sur ta combinaison…"))
             return
         super().keyReleaseEvent(e)
 
@@ -272,7 +275,7 @@ class ShortcutEdit(QWidget):
         super().focusOutEvent(e)
         if self.recording:
             QTimer.singleShot(0, lambda: self.recording and not self.hasFocus()
-                              and self.stop_recording("Raccourci inchangé."))
+                              and self.stop_recording(tr("Raccourci inchangé.")))
 
 
 # ----- the window ---------------------------------------------------------------------------
@@ -298,7 +301,7 @@ class _Slider(QSlider):
             e.ignore()                       # the page scrolls instead
 
 
-def _scale(slider: QSlider, low: str = "Plus léger", high: str = "Plus net") -> QWidget:
+def _scale(slider: QSlider, low: str | None = None, high: str | None = None) -> QWidget:
     """The slider with what each end means, under it."""
     w = QWidget()
     w.setAttribute(Qt.WA_TranslucentBackground)
@@ -307,9 +310,9 @@ def _scale(slider: QSlider, low: str = "Plus léger", high: str = "Plus net") ->
     lay.setSpacing(2)
     lay.addWidget(slider)
     ends = QHBoxLayout()
-    ends.addWidget(label(low, "note"))
+    ends.addWidget(label(low or tr("Plus léger"), "note"))
     ends.addStretch(1)
-    ends.addWidget(label(high, "note"))
+    ends.addWidget(label(high or tr("Plus net"), "note"))
     lay.addLayout(ends)
     return w
 
@@ -378,7 +381,7 @@ class _Banner(GlassPanel):
         lay.addWidget(logo, 0, Qt.AlignTop)
         texts = QVBoxLayout()
         texts.setSpacing(4)
-        texts.addWidget(label("Bienvenue dans Cerclic", "row"))
+        texts.addWidget(label(tr("Bienvenue dans Cerclic"), "row"))
         texts.addWidget(label(text, "desc"))
         lay.addLayout(texts, 1)
 
@@ -388,13 +391,17 @@ class _Way(KeyboardFocus, QWidget):
     set it up, the whole row is a link to it (tile in that page's colour, ›)."""
     opened = Signal()
 
-    def __init__(self, glyph: str, color: str, title: str, text: str, link: bool = False):
+    def __init__(self, glyph: str, color: str, title: str, text: str, link: bool = False,
+                 tip: str = ""):
         super().__init__()
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.glyph, self.color, self.link = glyph, QColor(color), link
         self._hover = False
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(60, 12, 36 if link else 16, 12)
+        start, end = 60, 36 if link else 16             # the tile is on the reading side
+        if self.layoutDirection() == Qt.RightToLeft:
+            start, end = end, start
+        lay.setContentsMargins(start, 12, end, 12)
         texts = QVBoxLayout()
         texts.setSpacing(2)
         texts.addWidget(label(title, "row"))
@@ -404,7 +411,8 @@ class _Way(KeyboardFocus, QWidget):
         if link:
             self.setCursor(Qt.PointingHandCursor)
             self.setFocusPolicy(Qt.TabFocus)
-            self.setToolTip(f"Régler : {title.lower()}")
+            if tip:
+                self.setToolTip(tip)
 
     def enterEvent(self, _):
         self._hover = True
@@ -434,13 +442,19 @@ class _Way(KeyboardFocus, QWidget):
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(30, 50, 100, 10))
             p.drawRoundedRect(QRectF(self.rect()).adjusted(6, 2, -6, -2), 10, 10)
-        tile = QRectF(16, self.height() / 2 - 16, 32, 32)
+        tile = mirrored(self, QRectF(16, self.height() / 2 - 16, 32, 32))
         p.setPen(Qt.NoPen)
         p.setBrush(self.color)
         p.drawRoundedRect(tile, 9, 9)
         draw_icon(p, self.glyph, tile.center().x(), tile.center().y(), 18, QColor("white"))
         if self.link:
-            draw_icon(p, "chevron", self.width() - 22, self.height() / 2, 12, QColor(MUTED))
+            at = mirrored(self, QRectF(self.width() - 22, self.height() / 2, 0, 0))
+            p.save()
+            p.translate(at.x(), at.y())
+            if self.layoutDirection() == Qt.RightToLeft:
+                p.scale(-1, 1)                          # « go there » points left
+            draw_icon(p, "chevron", 0, 0, 12, QColor(MUTED))
+            p.restore()
             if self.show_focus():
                 focus_ring(p, QRectF(self.rect()).adjusted(6, 4, -6, -4), 10)
 
@@ -458,15 +472,17 @@ class _SignTile(QLabel):
                            f"color:{MUTED};font-size:12px;")
 
 
-PAGES = [  # (key, label, glyph, tile colour)
-    ("general", "Général", "gear", "#2E7CF6"),
-    ("hotkey", "Raccourci clavier", "keyboard", "#5B5CE6"),
-    ("menu", "Clic droit", "menu", "#0EA5B7"),
-    ("files", "Fichiers créés", "folder", "#F29A13"),
-    ("signature", "Signature", "pen", "#8B5CF6"),
-    ("quality", "Qualité", "sliders", "#12A87E"),
-    ("about", "À propos", "info", "#64748B"),
+PAGES = [  # (key, label, glyph, tile colour); the label is shown with tr()
+    ("general", N_("Général"), "gear", "#2E7CF6"),
+    ("hotkey", N_("Raccourci clavier"), "keyboard", "#5B5CE6"),
+    ("menu", N_("Clic droit"), "menu", "#0EA5B7"),
+    ("files", N_("Fichiers créés"), "folder", "#F29A13"),
+    ("signature", N_("Signature"), "pen", "#8B5CF6"),
+    ("quality", N_("Qualité"), "sliders", "#12A87E"),
+    ("about", N_("À propos"), "info", "#64748B"),
 ]
+
+AUTO_LANGUAGE = "auto"
 
 
 class SettingsWindow(QWidget):
@@ -483,6 +499,7 @@ class SettingsWindow(QWidget):
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.s = settings
         self.windows_11 = windows_11
+        self.welcome = welcome
         self.store = store                # the Microsoft Store version
         self.setWindowTitle("Cerclic")
         from .logo import make_icon
@@ -518,13 +535,13 @@ class SettingsWindow(QWidget):
         self.nav: dict[str, NavItem] = {}
         group = QButtonGroup(self)
         for key, text, glyph, color in PAGES:
-            item = NavItem(text, glyph, color)
+            item = NavItem(tr(text), glyph, color)
             group.addButton(item)
             item.clicked.connect(lambda _=False, k=key: self.show_page(k))
             sl.addWidget(item)
             self.nav[key] = item
         sl.addStretch(1)
-        sl.addWidget(label("Les changements s'appliquent aussitôt.", "faint"))
+        sl.addWidget(label(tr("Les changements s'appliquent aussitôt."), "faint"))
         root.addWidget(side)
 
         # --- pages ---
@@ -561,78 +578,122 @@ class SettingsWindow(QWidget):
             self.stack.setCurrentWidget(self.pages[key])
             self.nav[key].setChecked(True)
 
+    def current_page(self) -> str:
+        shown = self.stack.currentWidget()
+        return next((k for k, page in self.pages.items() if page is shown), "general")
+
     def resizeEvent(self, e):
         self.backdrop.setGeometry(self.rect())
         self.backdrop.lower()
         super().resizeEvent(e)
 
     def _version_text(self) -> str:
-        return f"Version {__version__}" + (" · Microsoft Store" if self.store else "")
+        if self.store:
+            return tr("Version {version} · Microsoft Store", version=__version__)
+        return tr("Version {version}", version=__version__)
 
     # -- Général -----------------------------------------------------------------------
     def _how_keyboard(self) -> str:
-        return (f"Sélectionne un ou plusieurs fichiers dans {FILES_APP} ou sur le Bureau, "
-                f"puis appuie sur {self._combo_label()}.")
+        if IS_MAC:
+            return tr("Sélectionne un ou plusieurs fichiers dans le Finder ou sur le Bureau, "
+                      "puis appuie sur {combo}.", combo=self._combo_label())
+        return tr("Sélectionne un ou plusieurs fichiers dans l'Explorateur ou sur le Bureau, "
+                  "puis appuie sur {combo}.", combo=self._combo_label())
 
     def _combo_label(self) -> str:
         return hk.label(int(self.s.get("hotkey_mods")), int(self.s.get("hotkey_vk")))
 
     def _build_general(self, welcome: bool, win11_menu: bool) -> None:
-        page = self._page("general", "Général",
-                          ("Deux" if self.store else "Trois")
-                          + " façons d'ouvrir la roue, et le démarrage.")
+        page = self._page("general", tr("Général"),
+                          tr("Deux façons d'ouvrir la roue, le démarrage et la langue.")
+                          if self.store else
+                          tr("Trois façons d'ouvrir la roue, le démarrage et la langue."))
         if welcome:
-            where = ("dans la barre des menus, en haut de l'écran" if IS_MAC else
-                     "près de l'horloge (parfois cachée sous la petite flèche ^)")
-            page.add(_Banner(f"Cerclic tourne maintenant en arrière-plan : son icône est "
-                             f"{where}. Choisis ci-dessous ta façon préférée d'ouvrir la "
-                             "roue."))
-        ways = Group("Ouvrir la roue")
-        self.way_keyboard = ways.add(_Way("keyboard", "#5B5CE6", "Au clavier",
-                                          self._how_keyboard(), link=True))
+            page.add(_Banner(
+                tr("Cerclic tourne maintenant en arrière-plan : son icône est dans la barre "
+                   "des menus, en haut de l'écran. Choisis ci-dessous ta façon préférée "
+                   "d'ouvrir la roue.") if IS_MAC else
+                tr("Cerclic tourne maintenant en arrière-plan : son icône est près de "
+                   "l'horloge (parfois cachée sous la petite flèche ^). Choisis ci-dessous "
+                   "ta façon préférée d'ouvrir la roue.")))
+        ways = Group(tr("Ouvrir la roue"))
+        self.way_keyboard = ways.add(_Way("keyboard", "#5B5CE6", tr("Au clavier"),
+                                          self._how_keyboard(), link=True,
+                                          tip=tr("Régler : au clavier")))
         self.way_keyboard.opened.connect(lambda: self.show_page("hotkey"))
         if IS_MAC:
-            mouse = ("Clic droit sur le fichier, Actions rapides, puis « Cerclic ». "
-                     "Ou : Ouvrir avec, puis Cerclic.")
+            mouse = tr("Clic droit sur le fichier, Actions rapides, puis « Cerclic ». "
+                       "Ou : Ouvrir avec, puis Cerclic.")
         elif win11_menu:
-            mouse = ("Maj + clic droit sur le fichier, puis « Cerclic ». Sans Maj, passe "
-                     "par « Afficher d'autres options ».")
+            mouse = tr("Maj + clic droit sur le fichier, puis « Cerclic ». Sans Maj, passe "
+                       "par « Afficher d'autres options ».")
         else:
-            mouse = "Clic droit sur le fichier, puis « Cerclic »."
-        self.way_mouse = ways.add(_Way("mouse", "#0EA5B7", "À la souris", mouse, link=True))
+            mouse = tr("Clic droit sur le fichier, puis « Cerclic ».")
+        self.way_mouse = ways.add(_Way("mouse", "#0EA5B7", tr("À la souris"), mouse,
+                                       link=True, tip=tr("Régler : à la souris")))
         self.way_mouse.opened.connect(lambda: self.show_page("menu"))
         if not self.store:          # (no icon to drop files on: Start opens the app)
-            ways.add(_Way("drop", "#7A8497", "En glissant",
-                          "Glisse des fichiers sur l'icône de Cerclic"
-                          + (" (dans Applications ou le Dock)." if IS_MAC else ".")))
+            ways.add(_Way("drop", "#7A8497", tr("En glissant"),
+                          tr("Glisse des fichiers sur l'icône de Cerclic (dans Applications "
+                             "ou le Dock).") if IS_MAC else
+                          tr("Glisse des fichiers sur l'icône de Cerclic.")))
         page.add(group_block(ways))
 
-        start = Group("Démarrage")
-        self.autostart = Toggle("Lancer Cerclic avec " + ("le Mac" if IS_MAC else "Windows"))
+        start = Group(tr("Démarrage"))
+        self.autostart = Toggle(tr("Lancer Cerclic avec le Mac") if IS_MAC
+                                else tr("Lancer Cerclic avec Windows"))
         self.autostart.setChecked(bool(self.s.get("autostart")))
         self.autostart.toggled.connect(lambda on: self._set("autostart", on))
-        start.add(Row("Ouvrir Cerclic à l'ouverture de session" if IS_MAC else
-                      "Lancer Cerclic avec Windows",
-                      "Recommandé : la roue est prête dès que tu en as besoin.",
+        start.add(Row(tr("Ouvrir Cerclic à l'ouverture de session") if IS_MAC else
+                      tr("Lancer Cerclic avec Windows"),
+                      tr("Recommandé : la roue est prête dès que tu en as besoin."),
                       self.autostart))
-        quit_btn = _button("Quitter Cerclic", "",
-                           "Arrête Cerclic. Pour le relancer, ouvre-le depuis "
-                           + ("le dossier Applications." if IS_MAC else
-                              "le menu Démarrer." if self.store else
-                              "le Bureau ou le menu Démarrer."))
+        if IS_MAC:
+            again = tr("Arrête Cerclic. Pour le relancer, ouvre-le depuis le dossier "
+                       "Applications.")
+        elif self.store:
+            again = tr("Arrête Cerclic. Pour le relancer, ouvre-le depuis le menu Démarrer.")
+        else:
+            again = tr("Arrête Cerclic. Pour le relancer, ouvre-le depuis le Bureau ou le "
+                       "menu Démarrer.")
+        quit_btn = _button(tr("Quitter Cerclic"), "", again)
         quit_btn.clicked.connect(self.quit_requested.emit)
-        start.add(Row("Arrêter Cerclic", "La roue ne s'ouvrira plus jusqu'au prochain "
-                      "lancement.", quit_btn))
+        start.add(Row(tr("Arrêter Cerclic"), tr("La roue ne s'ouvrira plus jusqu'au "
+                                                 "prochain lancement."), quit_btn))
         page.add(group_block(start))
+
+        langs = Group()
+        self.language = Select()
+        self.language.setAccessibleName(tr("Langue"))
+        self.language.addItem(tr("Automatique (langue de l'ordinateur)"), AUTO_LANGUAGE)
+        for code, name in i18n.LANGS.items():       # each in its own language
+            self.language.addItem(name, code)
+        chosen = self.language.findData(self.s.get("language"))
+        self.language.setCurrentIndex(max(0, chosen))
+        self.language.activated.connect(self._language_chosen)
+        langs.add(Row(tr("Langue"), tr("Celle des menus, des fenêtres et des messages de "
+                                       "Cerclic."), self.language))
+        page.add(group_block(langs))
         page.finish()
+
+    def _language_chosen(self, index: int) -> None:
+        """Applies at once: saved, then in use (the app builds this window again
+        in the new language, see app.py)."""
+        code = self.language.itemData(index) or AUTO_LANGUAGE
+        if code == self.s.get("language"):
+            return
+        self._set("language", code)
+        i18n.set_language(code)
 
     def _confirm_uninstall(self) -> None:
         from PySide6.QtWidgets import QMessageBox
-        answer = QMessageBox.question(
-            self, "Désinstaller Cerclic",
-            "Retirer Cerclic du clic droit et de l'ouverture de session, puis le quitter ?",
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-        if answer == QMessageBox.Yes:
+        box = QMessageBox(QMessageBox.Question, tr("Désinstaller Cerclic"),
+                          tr("Retirer Cerclic du clic droit et de l'ouverture de session, "
+                             "puis le quitter ?"), QMessageBox.NoButton, self)
+        yes = box.addButton(tr("Désinstaller"), QMessageBox.AcceptRole)
+        box.setDefaultButton(box.addButton(tr("Annuler"), QMessageBox.RejectRole))
+        box.exec()
+        if box.clickedButton() is yes:
             self.uninstall_requested.emit()
 
     def _open_automation(self) -> None:
@@ -641,15 +702,18 @@ class SettingsWindow(QWidget):
 
     # -- Raccourci clavier ---------------------------------------------------------------
     def _build_hotkey(self) -> None:
-        page = self._page("hotkey", "Raccourci clavier",
-                          "Une combinaison de touches ouvre la roue sur les fichiers "
-                          "sélectionnés.")
+        page = self._page("hotkey", tr("Raccourci clavier"),
+                          tr("Une combinaison de touches ouvre la roue sur les fichiers "
+                             "sélectionnés."))
         g = Group()
-        self.hotkey_on = Toggle("Ouvrir la roue au clavier")
+        self.hotkey_on = Toggle(tr("Ouvrir la roue au clavier"))
         self.hotkey_on.setChecked(bool(self.s.get("hotkey")))
         self.hotkey_on.toggled.connect(self._hotkey_toggled)
-        g.add(Row("Ouvrir la roue au clavier", f"Sur les fichiers sélectionnés dans "
-                  f"{FILES_APP} ou sur le Bureau.", self.hotkey_on))
+        g.add(Row(tr("Ouvrir la roue au clavier"),
+                  tr("Sur les fichiers sélectionnés dans le Finder ou sur le Bureau.")
+                  if IS_MAC else
+                  tr("Sur les fichiers sélectionnés dans l'Explorateur ou sur le Bureau."),
+                  self.hotkey_on))
         self.shortcut = ShortcutEdit(int(self.s.get("hotkey_mods")),
                                      int(self.s.get("hotkey_vk")))
         self.shortcut.chosen.connect(self._combo_chosen)
@@ -661,61 +725,71 @@ class SettingsWindow(QWidget):
         hl.setContentsMargins(16, 4, 16, 14)
         hl.addWidget(self.shortcut)
         g.add(holder)
-        page.add(group_block(g, notes=(
-            "« Modifier », puis appuie sur ta combinaison. Si elle est déjà prise par "
-            f"{OS_NAME} ou une autre application, Cerclic te le dit et garde l'ancienne.",
-            "Une souris à boutons programmables ? Règle un bouton sur une touche "
-            + ("F13 à F20" if IS_MAC else "F13 à F24")
-            + ", puis choisis-la ici : un clic sur ce bouton ouvrira la roue.")))
         if IS_MAC:
-            mac = Group("Autorisation")
-            allow = _button("Réglages…")
+            notes = (tr("« Modifier », puis appuie sur ta combinaison. Si elle est déjà prise "
+                        "par macOS ou une autre application, Cerclic te le dit et garde "
+                        "l'ancienne."),
+                     tr("Une souris à boutons programmables ? Règle un bouton sur une touche "
+                        "F13 à F20, puis choisis-la ici : un clic sur ce bouton ouvrira la "
+                        "roue."))
+        else:
+            notes = (tr("« Modifier », puis appuie sur ta combinaison. Si elle est déjà prise "
+                        "par Windows ou une autre application, Cerclic te le dit et garde "
+                        "l'ancienne."),
+                     tr("Une souris à boutons programmables ? Règle un bouton sur une touche "
+                        "F13 à F24, puis choisis-la ici : un clic sur ce bouton ouvrira la "
+                        "roue."))
+        page.add(group_block(g, notes=notes))
+        if IS_MAC:
+            mac = Group(tr("Autorisation"))
+            allow = _button(tr("Réglages…"))
             allow.clicked.connect(self._open_automation)
-            mac.add(Row("Lire la sélection du Finder",
-                        "La première fois, macOS demande si Cerclic peut contrôler le "
-                        "Finder : accepte. Cerclic y lit seulement les fichiers "
-                        "sélectionnés.", allow))
+            mac.add(Row(tr("Lire la sélection du Finder"),
+                        tr("La première fois, macOS demande si Cerclic peut contrôler le "
+                           "Finder : accepte. Cerclic y lit seulement les fichiers "
+                           "sélectionnés."), allow))
             page.add(group_block(mac, notes=(
-                "Refusé par erreur ? Dans Automatisation, coche « Finder » sous Cerclic.",)))
+                tr("Refusé par erreur ? Dans Automatisation, coche « Finder » sous "
+                   "Cerclic."),)))
         page.finish()
 
     # -- Clic droit ---------------------------------------------------------------------------
     def _build_menu(self, windows_11: bool, classic_enabled: bool) -> None:
-        page = self._page("menu", "Clic droit",
-                          "« Cerclic » dans le menu du clic droit de tes fichiers.")
+        page = self._page("menu", tr("Clic droit"),
+                          tr("« Cerclic » dans le menu du clic droit de tes fichiers."))
         g = Group()
-        self.context_menu = Toggle("« Cerclic » dans le clic droit")
+        self.context_menu = Toggle(tr("« Cerclic » dans le clic droit"))
         self.context_menu.setChecked(bool(self.s.get("context_menu")))
         self.context_menu.toggled.connect(lambda on: self._set("context_menu", on))
         if IS_MAC:
-            g.add(Row("« Cerclic » dans le clic droit du Finder",
-                      "Dans le menu Actions rapides de tes fichiers, dans le Finder et sur "
-                      "le Bureau.", self.context_menu))
+            g.add(Row(tr("« Cerclic » dans le clic droit du Finder"),
+                      tr("Dans le menu Actions rapides de tes fichiers, dans le Finder et sur "
+                         "le Bureau."), self.context_menu))
         elif self.store:
-            g.add(Row("« Cerclic » dans le clic droit des fichiers",
-                      "En haut du menu des images, PDF, vidéos et sons, dans "
-                      "l'Explorateur et sur le Bureau.", self.context_menu))
+            g.add(Row(tr("« Cerclic » dans le clic droit des fichiers"),
+                      tr("En haut du menu des images, PDF, vidéos et sons, dans "
+                         "l'Explorateur et sur le Bureau."), self.context_menu))
         else:
-            g.add(Row("« Cerclic » dans le clic droit des fichiers",
-                      "Sur les images, PDF, vidéos et sons, dans l'Explorateur, sur le "
-                      "Bureau et dans les fenêtres Ouvrir et Enregistrer.",
+            g.add(Row(tr("« Cerclic » dans le clic droit des fichiers"),
+                      tr("Sur les images, PDF, vidéos et sons, dans l'Explorateur, sur le "
+                         "Bureau et dans les fenêtres Ouvrir et Enregistrer."),
                       self.context_menu))
         self.classic = None
         if windows_11 and not IS_MAC:
-            self.classic = Toggle("Menu clic droit complet")
+            self.classic = Toggle(tr("Menu clic droit complet"))
             self.classic.setChecked(classic_enabled)
             self.classic.toggled.connect(lambda on: self.changed.emit("classic_menu"))
-            g.add(Row("Menu clic droit complet",
-                      "Affiche le menu complet sans passer par « Afficher d'autres "
-                      "options ». Cerclic proposera de redémarrer l'Explorateur.",
+            g.add(Row(tr("Menu clic droit complet"),
+                      tr("Affiche le menu complet sans passer par « Afficher d'autres "
+                         "options ». Cerclic proposera de redémarrer l'Explorateur."),
                       self.classic))
         if IS_MAC:
-            notes = ("Pas dans Actions rapides ? Clic droit sur un fichier, Actions rapides "
-                     "puis Personnaliser, et coche « Cerclic ». Il est aussi toujours dans "
-                     "Ouvrir avec.",)
+            notes = (tr("Pas dans Actions rapides ? Clic droit sur un fichier, Actions "
+                        "rapides puis Personnaliser, et coche « Cerclic ». Il est aussi "
+                        "toujours dans Ouvrir avec."),)
         elif windows_11:
-            notes = ("Astuce : sans rien changer, Maj + clic droit sur un fichier ouvre "
-                     "directement le menu complet, avec « Cerclic ».",)
+            notes = (tr("Astuce : sans rien changer, Maj + clic droit sur un fichier ouvre "
+                        "directement le menu complet, avec « Cerclic »."),)
         else:
             notes = ()
         page.add(group_block(g, notes=notes))
@@ -723,22 +797,22 @@ class SettingsWindow(QWidget):
 
     # -- Fichiers créés ----------------------------------------------------------------------
     def _build_files(self) -> None:
-        page = self._page("files", "Fichiers créés",
-                          "Ton fichier d'origine n'est jamais modifié : chaque action crée "
-                          "un nouveau fichier.")
-        g = Group("Où les enregistrer")
+        page = self._page("files", tr("Fichiers créés"),
+                          tr("Ton fichier d'origine n'est jamais modifié : chaque action crée "
+                             "un nouveau fichier."))
+        g = Group(tr("Où les enregistrer"))
         box = QWidget()
         box.setAttribute(Qt.WA_TranslucentBackground)
         bl = QVBoxLayout(box)
         bl.setContentsMargins(16, 14, 16, 14)
         bl.setSpacing(10)
-        self.out_beside = Choice("À côté du fichier d'origine",
-                                 "Dans le même dossier, par exemple sur le Bureau si la "
-                                 "photo y est. Recommandé.")
-        self.out_folder = Choice("Dans un dossier de mon choix",
-                                 "Tous les fichiers créés au même endroit.")
-        self.out_ask = Choice("Me demander à chaque fois",
-                              "Cerclic te demande le dossier avant de créer le fichier.")
+        self.out_beside = Choice(tr("À côté du fichier d'origine"),
+                                 tr("Dans le même dossier, par exemple sur le Bureau si la "
+                                    "photo y est. Recommandé."))
+        self.out_folder = Choice(tr("Dans un dossier de mon choix"),
+                                 tr("Tous les fichiers créés au même endroit."))
+        self.out_ask = Choice(tr("Me demander à chaque fois"),
+                              tr("Cerclic te demande le dossier avant de créer le fichier."))
         mode = self.s.get("output_mode")
         {"folder": self.out_folder, "ask": self.out_ask}.get(
             mode, self.out_beside).setChecked(True)
@@ -751,9 +825,9 @@ class SettingsWindow(QWidget):
         row.setContentsMargins(38, 0, 0, 0)
         self.folder_label = label("", "desc")
         row.addWidget(self.folder_label, 1)
-        self.pick_btn = _button("Choisir…")
+        self.pick_btn = _button(tr("Choisir…"))
         self.pick_btn.clicked.connect(self._pick_folder)
-        self.open_btn = _button("Ouvrir", "ghost")
+        self.open_btn = _button(tr("Ouvrir"), "ghost")
         self.open_btn.clicked.connect(self._open_folder)
         row.addWidget(self.pick_btn)
         row.addWidget(self.open_btn)
@@ -761,10 +835,11 @@ class SettingsWindow(QWidget):
         bl.addWidget(self.out_ask)
         g.add(box)
         page.add(group_block(g, notes=(
-            "Leur nom : le nom d'origine, plus ce qui a changé, par exemple "
-            "photo (compressé).jpg à côté de photo.jpg. Si ce nom est déjà pris, Cerclic "
-            "ajoute un numéro : rien n'est jamais écrasé.",
-            "Un résultat ne te plaît pas ? « Supprimer » sur sa carte l'efface aussitôt.")))
+            tr("Leur nom : le nom d'origine, plus ce qui a changé, par exemple "
+               "photo (compressé).jpg à côté de photo.jpg. Si ce nom est déjà pris, Cerclic "
+               "ajoute un numéro : rien n'est jamais écrasé."),
+            tr("Un résultat ne te plaît pas ? « Supprimer » sur sa carte l'efface "
+               "aussitôt."))))
         page.finish()
         self._refresh_output()
 
@@ -774,10 +849,11 @@ class SettingsWindow(QWidget):
         if on and folder:
             self.folder_label.setText(folder)
         elif on:
-            self.folder_label.setText("Aucun dossier choisi.")
+            self.folder_label.setText(tr("Aucun dossier choisi."))
+        elif folder:
+            self.folder_label.setText(tr("Dossier de ton choix : {folder}", folder=folder))
         else:
-            self.folder_label.setText("Dossier de ton choix : " + (folder or "aucun pour "
-                                                                     "l'instant."))
+            self.folder_label.setText(tr("Dossier de ton choix : aucun pour l'instant."))
         self.pick_btn.setEnabled(True)
         self.open_btn.setVisible(bool(folder) and os.path.isdir(folder))
 
@@ -793,7 +869,8 @@ class SettingsWindow(QWidget):
     def _pick_folder(self) -> bool:
         from .signature import pictures_folder
         start = self.s.get("output_folder") or pictures_folder()
-        folder = QFileDialog.getExistingDirectory(self, "Dossier des fichiers créés", start)
+        folder = QFileDialog.getExistingDirectory(self, tr("Dossier des fichiers créés"),
+                                                  start)
         if not folder:
             return False
         self.s.set("output_folder", os.path.normpath(folder))
@@ -810,8 +887,9 @@ class SettingsWindow(QWidget):
 
     # -- Signature ----------------------------------------------------------------------------
     def _build_signature(self) -> None:
-        page = self._page("signature", "Signature",
-                          "Pour signer tes PDF en un geste. Elle reste sur cet ordinateur.")
+        page = self._page("signature", tr("Signature"),
+                          tr("Pour signer tes PDF en un geste. Elle reste sur cet "
+                             "ordinateur."))
         g = Group()
         box = QWidget()
         box.setAttribute(Qt.WA_TranslucentBackground)
@@ -821,11 +899,11 @@ class SettingsWindow(QWidget):
         self.sign_preview = _SignTile()
         bl.addWidget(self.sign_preview)
         row = QHBoxLayout()
-        draw = _button("Dessiner…")
+        draw = _button(tr("Dessiner…"))
         draw.clicked.connect(self.draw_signature.emit)
-        imp = _button("Importer une photo…")
+        imp = _button(tr("Importer une photo…"))
         imp.clicked.connect(self._import_signature)
-        self.clear_sig = _button("Effacer", "danger")
+        self.clear_sig = _button(tr("Effacer"), "danger")
         self.clear_sig.clicked.connect(self._clear_signature)
         row.addWidget(draw)
         row.addWidget(imp)
@@ -834,30 +912,31 @@ class SettingsWindow(QWidget):
         bl.addLayout(row)
         g.add(box)
         page.add(group_block(g, notes=(
-            "Une photo de ta signature sur papier blanc suffit : Cerclic rend le papier "
-            "transparent et garde l'encre.",
-            "Pour signer : clic droit ou raccourci sur un PDF, puis « Signer ». Place la "
-            f"signature et appuie sur {ENTER_KEY}.")))
+            tr("Une photo de ta signature sur papier blanc suffit : Cerclic rend le papier "
+               "transparent et garde l'encre."),
+            tr("Pour signer : clic droit ou raccourci sur un PDF, puis « Signer ». Place la "
+               "signature et appuie sur {key}.", key=tr(ENTER_KEY)))))
         page.finish()
 
     # -- Qualité ------------------------------------------------------------------------------
     def _build_quality(self) -> None:
-        page = self._page("quality", "Qualité",
-                          "Le juste milieu entre le poids des fichiers et leur netteté.")
+        page = self._page("quality", tr("Qualité"),
+                          tr("Le juste milieu entre le poids des fichiers et leur netteté."))
         g = Group()
         self.compress_q = _slider(10, 95, self.s.get("compress_quality"))
         self.compress_val = label("", "row")
         self.compress_q.valueChanged.connect(self._quality_changed)
-        g.add(Row("Compression des images", "Réglage proposé par « Compresser », qui "
-                  "montre la taille obtenue et retient ton dernier choix.",
+        g.add(Row(tr("Compression des images"),
+                  tr("Réglage proposé par « Compresser », qui montre la taille obtenue et "
+                     "retient ton dernier choix."),
                   self.compress_val, below=_scale(self.compress_q)))
         self.jpg_q = _slider(50, 100, self.s.get("jpg_quality"))
         self.jpg_val = label("", "row")
         self.jpg_q.valueChanged.connect(self._quality_changed)
-        g.add(Row("JPG créés par les autres actions",
-                  "Rogner, pivoter, convertir… À 90 %, la perte ne se voit pas.",
+        g.add(Row(tr("JPG créés par les autres actions"),
+                  tr("Rogner, pivoter, convertir… À 90 %, la perte ne se voit pas."),
                   self.jpg_val, below=_scale(self.jpg_q)))
-        reset = _button("Par défaut", "ghost")
+        reset = _button(tr("Par défaut"), "ghost")
         reset.clicked.connect(self._quality_defaults)
         line = QWidget()
         line.setAttribute(Qt.WA_TranslucentBackground)
@@ -872,8 +951,8 @@ class SettingsWindow(QWidget):
 
     def _quality_changed(self, *_):
         cq, jq = self.compress_q.value(), self.jpg_q.value()
-        self.compress_val.setText(f"{cq} %")
-        self.jpg_val.setText(f"{jq} %")
+        self.compress_val.setText(tr("{value} %", value=cq))
+        self.jpg_val.setText(tr("{value} %", value=jq))
         if cq != self.s.get("compress_quality"):
             self._set("compress_quality", cq)
         if jq != self.s.get("jpg_quality"):
@@ -886,7 +965,7 @@ class SettingsWindow(QWidget):
 
     # -- À propos -----------------------------------------------------------------------------
     def _build_about(self) -> None:
-        page = self._page("about", "À propos", "")
+        page = self._page("about", tr("À propos"), "")
         hero = GlassPanel(radius=18, alpha=190)
         hl = QHBoxLayout(hero)
         hl.setContentsMargins(22, 20, 22, 24)
@@ -901,26 +980,26 @@ class SettingsWindow(QWidget):
         texts.setSpacing(3)
         texts.addWidget(label("Cerclic", "title"))
         texts.addWidget(label(self._version_text(), "desc"))
-        texts.addWidget(label("Rogner, signer, compresser, convertir, mettre au format "
-                              "des réseaux sociaux… en un geste, sans ouvrir d'autre "
-                              "application.", "desc"))
+        texts.addWidget(label(tr("Rogner, signer, compresser, convertir, mettre au format "
+                                 "des réseaux sociaux… en un geste, sans ouvrir d'autre "
+                                 "application."), "desc"))
         hl.addLayout(texts, 1)
         page.add(hero)
         g = Group()
-        log_btn = _button("Ouvrir")
+        log_btn = _button(tr("Ouvrir"))
         log_btn.clicked.connect(self._open_log)
-        g.add(Row("Journal", "En cas de souci, ce fichier aide à comprendre ce qui s'est "
-                  "passé.", log_btn))
-        lic_btn = _button("Voir")
+        g.add(Row(tr("Journal"), tr("En cas de souci, ce fichier aide à comprendre ce qui "
+                                    "s'est passé."), log_btn))
+        lic_btn = _button(tr("Voir"))
         lic_btn.clicked.connect(self._open_licences)
-        g.add(Row("Licences", "Les composants libres qu'utilise Cerclic et leurs licences.",
-                  lic_btn))
+        g.add(Row(tr("Licences"),
+                  tr("Les composants libres qu'utilise Cerclic et leurs licences."), lic_btn))
         if IS_MAC:
-            remove = _button("Désinstaller…")
+            remove = _button(tr("Désinstaller…"))
             remove.clicked.connect(self._confirm_uninstall)
-            g.add(Row("Désinstaller Cerclic", "Retire « Cerclic » du clic droit et de "
-                      "l'ouverture de session, puis quitte. Il restera à mettre Cerclic.app "
-                      "à la corbeille.", remove))
+            g.add(Row(tr("Désinstaller Cerclic"),
+                      tr("Retire « Cerclic » du clic droit et de l'ouverture de session, puis "
+                         "quitte. Il restera à mettre Cerclic.app à la corbeille."), remove))
         page.add(group_block(g))
         page.finish()
 
@@ -995,17 +1074,21 @@ class SettingsWindow(QWidget):
     def _apply_hotkey_status(self, ok: bool | None) -> None:
         if not self.hotkey_on.isChecked():
             self.shortcut.set_status(
-                "Raccourci désactivé : le clic droit « Cerclic » reste disponible."
-                if self.context_menu.isChecked() else "Raccourci désactivé.")
+                tr("Raccourci désactivé : le clic droit « Cerclic » reste disponible.")
+                if self.context_menu.isChecked() else tr("Raccourci désactivé."))
         elif ok is None:
             self.shortcut.set_status("")
         elif ok:
-            self.shortcut.set_status("✓ Actif partout "
-                                     + ("sur le Mac." if IS_MAC else "dans Windows."), "ok")
+            self.shortcut.set_status(tr("✓ Actif partout sur le Mac.") if IS_MAC
+                                     else tr("✓ Actif partout dans Windows."), "ok")
+        elif IS_MAC:
+            self.shortcut.set_status(tr("macOS ou une autre application utilise déjà cette "
+                                        "combinaison. Choisis-en une autre avec "
+                                        "« Modifier »."), "error")
         else:
-            self.shortcut.set_status(f"{OS_NAME} ou une autre application utilise déjà "
-                                     "cette combinaison. Choisis-en une autre avec "
-                                     "« Modifier ».", "error")
+            self.shortcut.set_status(tr("Windows ou une autre application utilise déjà "
+                                        "cette combinaison. Choisis-en une autre avec "
+                                        "« Modifier »."), "error")
 
     def set_autostart(self, on: bool) -> None:
         """What Windows says about starting with it (Microsoft Store version:
@@ -1036,15 +1119,15 @@ class SettingsWindow(QWidget):
         self.clear_sig.setVisible(False)              # nothing to erase
         self.sign_preview.setPixmap(QPixmap())
         from .glass import french
-        self.sign_preview.setText(french("Aucune signature pour l'instant : dessine-la ou "
-                                         "importe une photo. Sinon, elle te sera demandée "
-                                         "la première fois que tu signes."))
+        self.sign_preview.setText(french(tr("Aucune signature pour l'instant : dessine-la "
+                                            "ou importe une photo. Sinon, elle te sera "
+                                            "demandée la première fois que tu signes.")))
 
     def _import_signature(self) -> None:
         from .signature import pictures_folder
         src, _ = QFileDialog.getOpenFileName(
-            self, "Choisir une photo de ta signature", pictures_folder(),
-            "Images (*.png *.jpg *.jpeg *.webp *.heic *.bmp)")
+            self, tr("Choisir une photo de ta signature"), pictures_folder(),
+            tr("Images") + " (*.png *.jpg *.jpeg *.webp *.heic *.bmp)")
         if not src:
             return
         from .signature import import_signature, signature_path
@@ -1053,7 +1136,7 @@ class SettingsWindow(QWidget):
         except Exception as exc:
             self.sign_preview.setPixmap(QPixmap())
             self.sign_preview.setText(str(exc) if isinstance(exc, ValueError)
-                                      else "Image illisible.")
+                                      else tr("Image illisible."))
             return
         self._set("signature", path)
         self.refresh_signature()

@@ -11,6 +11,7 @@ import os
 import sys
 import threading
 import time
+import weakref
 
 from PySide6.QtCore import (QEvent, QEventLoop, QObject, QPoint, QRect, QSize, Qt, QTimer,
                             Signal, qInstallMessageHandler)
@@ -18,12 +19,13 @@ from PySide6.QtGui import QCursor
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
-from . import APP_NAME, __version__, engine, launcher
+from . import APP_NAME, __version__, engine, i18n, launcher
 from .actions import registry
+from .i18n import tr, trn
 from .log import log, log_exception, log_path
 from .paths import clean_selection, fallback_folder, kind_of, natural_key
 from .settings import Settings
-from .system import FILES_APP, IS_MAC, IS_WINDOWS, MOD_KEY, OS_NAME, hotkey_supported, hotkeys
+from .system import IS_MAC, IS_WINDOWS, MOD_KEY, hotkey_supported, hotkeys
 from .win.foreground import bring_to_front
 
 # A right-click on many files starts one forwarder per file: paths arriving
@@ -46,7 +48,7 @@ def _summary(paths: list[str]) -> str:
     if len(paths) == 1:
         name = os.path.basename(paths[0])
         return name if len(name) <= 26 else name[:23] + "…"
-    return f"{len(paths)} fichiers"
+    return trn("{n} fichier", "{n} fichiers", len(paths))
 
 
 def _drop_precomputed(opts: dict) -> None:
@@ -82,12 +84,36 @@ def _elsewhere_note(sources: list[str], outputs: list[str], chosen: str | None =
         return False
 
     if all(beside(o) for o in outputs):
-        return "Le dossier choisi est introuvable : enregistré à côté de l'original." \
+        return tr("Le dossier choisi est introuvable : enregistré à côté de l'original.") \
             if chosen else ""
     fb = fallback_folder()
     where = os.path.basename(fb.rstrip("\\/")) or fb
-    where = {"downloads": "Téléchargements"}.get(where.lower(), where)  # as Explorer shows it
-    return f"Enregistré dans «\u00a0{where}\u00a0» : le dossier d'origine est protégé."
+    if where.lower() == "downloads":                   # as Explorer shows it
+        where = tr("Téléchargements")
+    return tr("Enregistré dans «\u00a0{where}\u00a0» : le dossier d'origine est protégé.",
+              where=where)
+
+
+# ----- language -----------------------------------------------------------------------
+
+_running = None         # weak reference to the CerclicApp in use (rebuilt on a change)
+
+
+def apply_direction(qapp=None) -> None:
+    """Right to left for Arabic, left to right otherwise, for every window."""
+    qapp = qapp or QApplication.instance()
+    if qapp is not None:
+        qapp.setLayoutDirection(Qt.RightToLeft if i18n.is_rtl() else Qt.LeftToRight)
+
+
+def _language_changed() -> None:
+    apply_direction()
+    app = _running() if _running is not None else None
+    if app is not None:
+        app.language_changed()
+
+
+i18n.on_change(_language_changed)
 
 
 # ----- request server ---------------------------------------------------------------
@@ -342,6 +368,11 @@ class CerclicApp(QObject):
             self.settings.set("context_menu", False)
             self.settings.set("autostart", False)
             self.settings.save()
+        # The language first: every window, menu and message speaks it.
+        global _running
+        i18n.set_language(self.settings.get("language"))
+        apply_direction(qapp)
+        _running = weakref.ref(self)          # made again in a newly chosen language
         self.cards = CardStack()
         self._recover_unfinished()
         self.session: WheelSession | None = None
@@ -415,14 +446,29 @@ class CerclicApp(QObject):
         from .ui.trayicon import make_tray_icon
         self.tray = QSystemTrayIcon(make_tray_icon(), self.qapp)
         self.tray.setToolTip(f"{APP_NAME} {__version__}")
-        menu = QMenu()
-        menu.addAction("Ouvrir Cerclic", self.open_settings)
-        menu.addSeparator()
-        menu.addAction("Quitter Cerclic", self.quit)
-        self.tray.setContextMenu(menu)
+        self._menu = QMenu()
+        self._fill_tray_menu()
+        self.tray.setContextMenu(self._menu)
         self.tray.activated.connect(self._tray_activated)
         self.tray.show()
-        self._menu = menu
+
+    def _fill_tray_menu(self) -> None:
+        """The icon's menu, in the language in use (made again when it changes)."""
+        menu = self._menu
+        menu.clear()
+        menu.addAction(tr("Ouvrir Cerclic"), self.open_settings)
+        menu.addSeparator()
+        menu.addAction(tr("Quitter Cerclic"), self.quit)
+
+    def language_changed(self) -> None:
+        """Another language: the icon's menu and Cerclic's window, if open, are
+        made again in it (the window where it was, on the same section)."""
+        try:
+            self._fill_tray_menu()
+        except RuntimeError:
+            pass
+        if self._settings_window() is not None:
+            QTimer.singleShot(0, self._reopen_settings)
 
     def _tray_activated(self, reason) -> None:
         if IS_MAC:
@@ -513,16 +559,16 @@ class CerclicApp(QObject):
                 pass
         if asked and wanted and not on:
             if state == "disabled_by_policy":
-                self.message("Lancement avec Windows bloqué",
-                             "Ton organisation ne permet pas aux applications de se lancer "
-                             "avec Windows.", kind="warn")
+                self.message(tr("Lancement avec Windows bloqué"),
+                             tr("Ton organisation ne permet pas aux applications de se "
+                                "lancer avec Windows."), kind="warn")
             else:
-                self.message("Lancement avec Windows désactivé dans Windows",
-                             "Il a été désactivé dans le Gestionnaire des tâches : seul "
-                             "Windows peut le réactiver. Dans Paramètres, Applications, "
-                             "Démarrage, active « Cerclic ».", kind="warn",
-                             buttons=[("Plus tard", None),
-                                      ("Ouvrir", package.open_startup_settings)],
+                self.message(tr("Lancement avec Windows désactivé dans Windows"),
+                             tr("Il a été désactivé dans le Gestionnaire des tâches : seul "
+                                "Windows peut le réactiver. Dans Paramètres, Applications, "
+                                "Démarrage, active « Cerclic »."), kind="warn",
+                             buttons=[(tr("Plus tard"), None),
+                                      (tr("Ouvrir"), package.open_startup_settings)],
                              auto_ms=20000)
         log(f"lancement avec Windows : {state}")
 
@@ -535,25 +581,25 @@ class CerclicApp(QObject):
         uninstaller = package.classic_uninstaller()
         if uninstaller:
             from .ui.cards import reveal_path
-            self.message("Deux Cerclic installés",
-                         "La version de Cerclic installée sans le Microsoft Store est "
-                         "encore là. Pour n'avoir qu'un « Cerclic » dans le clic droit et "
-                         "un seul raccourci, retire-la : « Montrer le désinstalleur », "
-                         "puis double-clique « unins000 ».",
+            self.message(tr("Deux Cerclic installés"),
+                         tr("La version de Cerclic installée sans le Microsoft Store est "
+                            "encore là. Pour n'avoir qu'un « Cerclic » dans le clic droit et "
+                            "un seul raccourci, retire-la : « Montrer le désinstalleur », "
+                            "puis double-clique « unins000 »."),
                          kind="warn",
-                         buttons=[("Plus tard", None),
-                                  ("Montrer le désinstalleur",
+                         buttons=[(tr("Plus tard"), None),
+                                  (tr("Montrer le désinstalleur"),
                                    lambda: reveal_path(uninstaller))],
                          auto_ms=30000)
         else:
-            self.message("Deux Cerclic installés",
-                         "La version de Cerclic installée sans le Microsoft Store est "
-                         "encore là. Pour n'avoir qu'un « Cerclic », désinstalle-la dans "
-                         "Applications installées : c'est le Cerclic qui n'a pas "
-                         "« Options avancées » dans son menu.",
+            self.message(tr("Deux Cerclic installés"),
+                         tr("La version de Cerclic installée sans le Microsoft Store est "
+                            "encore là. Pour n'avoir qu'un « Cerclic », désinstalle-la dans "
+                            "Applications installées : c'est le Cerclic qui n'a pas "
+                            "« Options avancées » dans son menu."),
                          kind="warn",
-                         buttons=[("Plus tard", None),
-                                  ("Ouvrir les applications", package.open_apps_settings)],
+                         buttons=[(tr("Plus tard"), None),
+                                  (tr("Ouvrir les applications"), package.open_apps_settings)],
                          auto_ms=30000)
 
     def _apply_mac(self) -> None:
@@ -635,39 +681,67 @@ class CerclicApp(QObject):
             self.settings.set("hotkey_vk", trying[1])
             self.settings.save()
             if win is not None:
-                self._hotkey_note = (f"{refused} est déjà utilisé par {OS_NAME} ou une "
-                                     f"autre application. Ton raccourci reste {kept}.")
+                self._hotkey_note = (
+                    tr("{refused} est déjà utilisé par macOS ou une autre application. "
+                       "Ton raccourci reste {kept}.", refused=refused, kept=kept) if IS_MAC
+                    else tr("{refused} est déjà utilisé par Windows ou une autre "
+                            "application. Ton raccourci reste {kept}.",
+                            refused=refused, kept=kept))
                 win.show_combo(*trying)
             else:
-                self.message(f"Raccourci {refused} indisponible",
-                             f"{OS_NAME} ou une autre application l'utilise déjà. "
-                             f"Ton raccourci reste {kept}.", kind="warn")
+                self.message(tr("Raccourci {combo} indisponible", combo=refused),
+                             tr("macOS ou une autre application l'utilise déjà. Ton "
+                                "raccourci reste {kept}.", kept=kept) if IS_MAC
+                             else tr("Windows ou une autre application l'utilise déjà. "
+                                     "Ton raccourci reste {kept}.", kept=kept),
+                             kind="warn")
             self._apply_hotkey(restart=True)
             return
         if win is not None:
             note, self._hotkey_note = self._hotkey_note, ""
             win.set_hotkey_status(ok, note)
         elif not ok:
-            fallback = (" ; le clic droit « Cerclic » marche toujours"
-                        if self.settings.get("context_menu") else "")
-            self.message(f"Raccourci {self.hotkey_label()} indisponible",
-                         f"{OS_NAME} ou une autre application l'utilise déjà. Choisis-en "
-                         f"un autre dans Cerclic{fallback}.",
-                         kind="warn", buttons=[("Plus tard", None),
-                                               ("Changer de raccourci", self._open_hotkey_page)])
+            self.message(tr("Raccourci {combo} indisponible", combo=self.hotkey_label()),
+                         self._hotkey_taken_text(),
+                         kind="warn", buttons=[(tr("Plus tard"), None),
+                                               (tr("Changer de raccourci"),
+                                                self._open_hotkey_page)])
 
-    def right_click_how(self) -> str:
-        """How to reach the right-click entry on this system."""
+    def _hotkey_taken_text(self) -> str:
+        if self.settings.get("context_menu"):
+            if IS_MAC:
+                return tr("macOS ou une autre application l'utilise déjà. Choisis-en un "
+                          "autre dans Cerclic ; le clic droit « Cerclic » marche toujours.")
+            return tr("Windows ou une autre application l'utilise déjà. Choisis-en un "
+                      "autre dans Cerclic ; le clic droit « Cerclic » marche toujours.")
         if IS_MAC:
-            return "clic droit, Actions rapides, puis « Cerclic »"
+            return tr("macOS ou une autre application l'utilise déjà. Choisis-en un autre "
+                      "dans Cerclic.")
+        return tr("Windows ou une autre application l'utilise déjà. Choisis-en un autre "
+                  "dans Cerclic.")
+
+    def _right_click_way(self) -> str:
+        """Which right-click menu holds the entry: "mac" (Quick Actions),
+        "more" (Windows 11's « Afficher d'autres options ») or "plain"."""
+        if IS_MAC:
+            return "mac"
         if os.name == "nt" and not self.packaged:
             try:
                 from .win import shell
                 if shell.is_windows_11() and not shell.classic_menu_enabled():
-                    return "clic droit, « Afficher d'autres options », puis « Cerclic »"
+                    return "more"
             except Exception:
                 pass
-        return "clic droit, puis « Cerclic »"
+        return "plain"
+
+    def right_click_how(self) -> str:
+        """How to reach the right-click entry on this system."""
+        way = self._right_click_way()
+        if way == "mac":
+            return tr("clic droit, Actions rapides, puis « Cerclic »")
+        if way == "more":
+            return tr("clic droit, « Afficher d'autres options », puis « Cerclic »")
+        return tr("clic droit, puis « Cerclic »")
 
     # -- requests ------------------------------------------------------------------------
     def handle_request(self, cmd: str, paths: list) -> None:
@@ -681,8 +755,8 @@ class CerclicApp(QObject):
                 self.quit()
         except Exception:
             log_exception(f"demande {cmd} a échoué")
-            self.message("Cerclic a rencontré un problème",
-                         f"Les détails sont dans {log_path()}", kind="error")
+            self.message(tr("Cerclic a rencontré un problème"),
+                         tr("Les détails sont dans {path}", path=log_path()), kind="error")
 
     def _on_hotkey(self) -> None:
         # One read at a time; a read stuck on a frozen Explorer window does not
@@ -728,12 +802,12 @@ class CerclicApp(QObject):
             return
         self._reading_selection = 0
         from .mac.integration import open_automation_settings
-        self.message("Autorise Cerclic à lire ta sélection",
-                     "Réglages Système, Confidentialité et sécurité, Automatisation : "
-                     "coche « Finder » sous Cerclic. Le clic droit, Actions rapides, "
-                     "« Cerclic » marche sans cela.", kind="warn",
-                     buttons=[("Plus tard", None),
-                              ("Ouvrir les réglages", open_automation_settings)],
+        self.message(tr("Autorise Cerclic à lire ta sélection"),
+                     tr("Réglages Système, Confidentialité et sécurité, Automatisation : "
+                        "coche « Finder » sous Cerclic. Le clic droit, Actions rapides, "
+                        "« Cerclic » marche sans cela."), kind="warn",
+                     buttons=[(tr("Plus tard"), None),
+                              (tr("Ouvrir les réglages"), open_automation_settings)],
                      auto_ms=25000)
 
     # -- files sent by macOS ---------------------------------------------------------------
@@ -774,24 +848,39 @@ class CerclicApp(QObject):
         supported = [p for p in paths if kind_of(p) != "other"]
         if not supported:
             if asked and not paths:
-                self.message("Fichier inaccessible",
-                             "Ce fichier n'est pas dans un dossier normal (archive ZIP, "
-                             "téléphone…). Copie-le dans un dossier, puis réessaie.")
+                self.message(tr("Fichier inaccessible"),
+                             tr("Ce fichier n'est pas dans un dossier normal (archive ZIP, "
+                                "téléphone…). Copie-le dans un dossier, puis réessaie."))
             elif paths:
-                self.message("Aucune action pour ce type de fichier",
-                             "Cerclic travaille sur les images, les PDF, les vidéos "
-                             "et les sons.")
+                self.message(tr("Aucune action pour ce type de fichier"),
+                             tr("Cerclic travaille sur les images, les PDF, les vidéos "
+                                "et les sons."))
             else:
-                self.message("Sélectionne d'abord un fichier",
-                             "Clique sur une image, un PDF, une vidéo ou un son dans "
-                             f"{FILES_APP} ou sur le Bureau, puis appuie sur "
-                             f"{self.hotkey_label()}."
-                             + (f" Ou : {self.right_click_how()}."
-                                if self.settings.get("context_menu") else ""))
+                self.message(tr("Sélectionne d'abord un fichier"), self._select_first_text())
             return
         if self.session is not None:
             self.session.close()
         self.session = WheelSession(self, supported, QCursor.pos(), source)
+
+    def _select_first_text(self) -> str:
+        """How to open the wheel, said when the shortcut found no file."""
+        combo = self.hotkey_label()
+        if IS_MAC:
+            text = tr("Clique sur une image, un PDF, une vidéo ou un son dans le Finder ou "
+                      "sur le Bureau, puis appuie sur {combo}.", combo=combo)
+        else:
+            text = tr("Clique sur une image, un PDF, une vidéo ou un son dans l'Explorateur "
+                      "ou sur le Bureau, puis appuie sur {combo}.", combo=combo)
+        if not self.settings.get("context_menu"):
+            return text
+        way = self._right_click_way()
+        if way == "mac":
+            more = tr("Ou : clic droit, Actions rapides, puis « Cerclic ».")
+        elif way == "more":
+            more = tr("Ou : clic droit, « Afficher d'autres options », puis « Cerclic ».")
+        else:
+            more = tr("Ou : clic droit, puis « Cerclic ».")
+        return text + " " + more
 
     # -- action flow -------------------------------------------------------------------------
     def start_action(self, action_id: str, paths: list[str], choice_opts: dict,
@@ -823,11 +912,12 @@ class CerclicApp(QObject):
 
     def _copied(self, img, err) -> None:
         if err or img is None or img.isNull():
-            self.message("Copie impossible", err or "Image illisible.", kind="error")
+            self.message(tr("Copie impossible"), err or tr("Image illisible."), kind="error")
             return
         QApplication.clipboard().setImage(img)
         log("image copiée dans le presse-papiers")
-        self.message("Image copiée", f"Colle-la où tu veux avec {MOD_KEY} + V.", kind="ok",
+        self.message(tr("Image copiée"),
+                     tr("Colle-la où tu veux avec {key} + V.", key=tr(MOD_KEY)), kind="ok",
                      auto_ms=3500)
 
     def _drive(self, gen, value=None) -> None:
@@ -839,8 +929,8 @@ class CerclicApp(QObject):
             return
         except Exception:
             log_exception("déroulé d'une action")
-            self.message("Cerclic a rencontré un problème",
-                         f"Les détails sont dans {log_path()}", kind="error")
+            self.message(tr("Cerclic a rencontré un problème"),
+                         tr("Les détails sont dans {path}", path=log_path()), kind="error")
             self.focus_back_later()
             return
         ask(lambda result: self._drive(gen, result))
@@ -873,19 +963,19 @@ class CerclicApp(QObject):
         if action.id in registry.PASSWORD_AWARE:
             # Each protected PDF is asked for by name (a password already typed
             # for another one is tried first: often they share it).
-            ok_label = "Déverrouiller" if action.id == "pdf_unlock" else "Continuer"
+            ok_label = tr("Déverrouiller") if action.id == "pdf_unlock" else tr("Continuer")
             passwords: dict[str, str] = {}
             for f in [f for f in files if pdf_actions.needs_password(f)]:
                 pw = next((k for k in dict.fromkeys(passwords.values())
                            if pdf_actions.password_ok(f, k)), None)
-                hint = f"« {os.path.basename(f)} » est protégé."
+                hint = tr("« {name} » est protégé.", name=os.path.basename(f))
                 tries = 0
                 while pw is None:
                     if tries == 4:
-                        self.message("Mot de passe incorrect", "Rien n'a été créé.",
+                        self.message(tr("Mot de passe incorrect"), tr("Rien n'a été créé."),
                                      kind="error")
                         return
-                    typed = yield self._ask_text("Mot de passe du PDF", hint, pos,
+                    typed = yield self._ask_text(tr("Mot de passe du PDF"), hint, pos,
                                                  password=True, ok_label=ok_label)
                     if typed is None:
                         return
@@ -893,8 +983,8 @@ class CerclicApp(QObject):
                     if pdf_actions.password_ok(f, typed):
                         pw = typed
                     else:
-                        hint = (f"Mot de passe incorrect pour « {os.path.basename(f)} ». "
-                                "Réessaie.")
+                        hint = tr("Mot de passe incorrect pour « {name} ». Réessaie.",
+                                  name=os.path.basename(f))
                 passwords[f] = pw
             if passwords:
                 opts["passwords"] = passwords
@@ -905,13 +995,19 @@ class CerclicApp(QObject):
                 from .actions.images import page_count
                 pages = page_count(files[0])
                 if pages > 1:                  # a scan: say so before any popup
-                    first = {"crop": "Rogner n'en garderait que la première",
-                             "social": "Seule la première serait mise au format",
-                             "compress": "Compresser n'en garderait que la première"}[need]
-                    self.message(f"« {os.path.basename(files[0])} » a {pages} pages",
-                                 f"{first}. Utilise « En PDF » pour les garder toutes"
-                                 + (f", puis {action.label} sur le PDF."
-                                    if need in ("crop", "compress") else "."))
+                    if need == "crop":
+                        text = tr("Rogner n'en garderait que la première. Utilise « En PDF » "
+                                  "pour les garder toutes, puis {action} sur le PDF.",
+                                  action=tr(action.label))
+                    elif need == "compress":
+                        text = tr("Compresser n'en garderait que la première. Utilise "
+                                  "« En PDF » pour les garder toutes, puis {action} sur le "
+                                  "PDF.", action=tr(action.label))
+                    else:
+                        text = tr("Seule la première serait mise au format. Utilise "
+                                  "« En PDF » pour les garder toutes.")
+                    self.message(trn("« {name} » a {n} page", "« {name} » a {n} pages", pages,
+                                     name=os.path.basename(files[0])), text)
                     return
             if need == "crop":
                 from .ui.crop_editor import CropEditor
@@ -982,17 +1078,17 @@ class CerclicApp(QObject):
                 self.settings.save()
                 opts.update(res)
             elif need == "text":
-                txt = yield self._ask_text("Texte du filigrane",
-                                           "Il sera écrit en diagonale sur chaque page.",
-                                           pos, default="CONFIDENTIEL")
+                txt = yield self._ask_text(tr("Texte du filigrane"),
+                                           tr("Il sera écrit en diagonale sur chaque page."),
+                                           pos, default=tr("CONFIDENTIEL"))
                 if txt is None:
                     return
                 opts["text"] = txt
             elif need == "new_password":
-                pw = yield self._ask_text("Mot de passe à mettre",
-                                          "Il sera demandé pour ouvrir le PDF. "
-                                          "L'original reste sans mot de passe.",
-                                          pos, password=True, ok_label="Protéger")
+                pw = yield self._ask_text(tr("Mot de passe à mettre"),
+                                          tr("Il sera demandé pour ouvrir le PDF. "
+                                             "L'original reste sans mot de passe."),
+                                          pos, password=True, ok_label=tr("Protéger"))
                 if pw is None:
                     return
                 opts["new_password"] = pw
@@ -1027,7 +1123,7 @@ class CerclicApp(QObject):
                     bring_to_front(0)
                 try:
                     folder = QFileDialog.getExistingDirectory(
-                        anchor, "Où enregistrer le résultat ?", os.path.dirname(src))
+                        anchor, tr("Où enregistrer le résultat ?"), os.path.dirname(src))
                 finally:
                     if anchor is not None:
                         self._live.discard(anchor)
@@ -1038,7 +1134,9 @@ class CerclicApp(QObject):
         return ask
 
     def _ask_text(self, title, subtitle, pos, password=False, default="",
-                  ok_label="OK"):
+                  ok_label=None):
+        ok_label = ok_label or tr("OK")
+
         def ask(cb):
             from .ui.bubble import PromptBubble
             bubble = PromptBubble(title, subtitle, password=password, default=default,
@@ -1080,7 +1178,7 @@ class CerclicApp(QObject):
     def _run_job(self, action, files, opts, pos, attempts: int) -> None:
         from .ui.cards import JobCard
         job = Job(action.id, files, dict(opts), journal=self.journal)
-        card = JobCard(action.card_title)
+        card = JobCard(tr(action.card_title))
         state = {"shown": False}
 
         def show_card():
@@ -1122,8 +1220,8 @@ class CerclicApp(QObject):
         QTimer.singleShot(250, show_card)
 
     def _retry_password(self, action, files, opts, pos, attempts, error, path=""):
-        pw = yield self._ask_text("Mot de passe du PDF", error, pos, password=True,
-                                  ok_label="Réessayer")
+        pw = yield self._ask_text(tr("Mot de passe du PDF"), error, pos, password=True,
+                                  ok_label=tr("Réessayer"))
         if pw is None:
             return
         opts = dict(opts)
@@ -1152,11 +1250,11 @@ class CerclicApp(QObject):
         except Exception:
             log_exception("menu classique")
             return
-        self.message("Menu complet activé",
-                     "Il s'applique au redémarrage de l'Explorateur. Les fenêtres de "
-                     "dossiers ouvertes vont se fermer.",
-                     buttons=[("Plus tard", None),
-                              ("Redémarrer l'Explorateur", self._restart_explorer)],
+        self.message(tr("Menu complet activé"),
+                     tr("Il s'applique au redémarrage de l'Explorateur. Les fenêtres de "
+                        "dossiers ouvertes vont se fermer."),
+                     buttons=[(tr("Plus tard"), None),
+                              (tr("Redémarrer l'Explorateur"), self._restart_explorer)],
                      auto_ms=20000)
 
     def disable_classic_menu(self) -> None:
@@ -1168,10 +1266,10 @@ class CerclicApp(QObject):
         self.settings.set("classic_menu", False)
         self.settings.set("classic_menu_by_cerclic", False)
         self.settings.save()
-        self.message("Menu de Windows 11 rétabli",
-                     "Il s'applique au redémarrage de l'Explorateur.",
-                     buttons=[("Plus tard", None),
-                              ("Redémarrer l'Explorateur", self._restart_explorer)],
+        self.message(tr("Menu de Windows 11 rétabli"),
+                     tr("Il s'applique au redémarrage de l'Explorateur."),
+                     buttons=[(tr("Plus tard"), None),
+                              (tr("Redémarrer l'Explorateur"), self._restart_explorer)],
                      auto_ms=20000)
 
     def _restart_explorer(self) -> None:
@@ -1201,6 +1299,9 @@ class CerclicApp(QObject):
             win.raise_()
             win.activateWindow()
             return
+        self._new_settings_window(welcome).show_centered(QCursor.pos())
+
+    def _new_settings_window(self, welcome: bool = False):
         from .ui.settings_window import SettingsWindow
         win11 = classic = False
         if os.name == "nt" and not self.packaged:   # (the Store version's entry is
@@ -1214,10 +1315,45 @@ class CerclicApp(QObject):
         win.draw_signature.connect(lambda: self._draw_signature(win))
         win.quit_requested.connect(self.quit)
         win.uninstall_requested.connect(self.uninstall_mac)
-        win.destroyed.connect(lambda *_: setattr(self, "_settings_win", None))
+        win.destroyed.connect(lambda *_, w=win: self._settings_win is w
+                              and setattr(self, "_settings_win", None))
         self._settings_win = win
         win.set_hotkey_status(self.hotkey_ok if self.hotkey is not None else None)
-        win.show_centered(QCursor.pos())
+        return win
+
+    def _reopen_settings(self) -> None:
+        """Cerclic's window made again in the language now in use: same place,
+        same size, same section, scrolled as it was."""
+        old = self._settings_window()
+        if old is None:
+            return
+        page, geometry = old.current_page(), old.geometry()
+        scroll = old.pages[page].verticalScrollBar().value()
+        visible, minimized = old.isVisible(), old.isMinimized()
+        language_focused = old.language.hasFocus()
+        win = self._new_settings_window(welcome=old.welcome)
+        old.close()
+        win.show_page(page)
+        win.setGeometry(geometry)
+        if not visible:
+            return
+        if minimized:
+            win.showMinimized()
+            return
+        win.show()
+        win.raise_()
+        win.activateWindow()
+        bar = win.pages[page].verticalScrollBar()
+
+        def scroll_back():
+            try:
+                bar.setValue(scroll)
+            except RuntimeError:            # closed meanwhile
+                pass
+        scroll_back()
+        QTimer.singleShot(0, scroll_back)   # once the page is laid out
+        if language_focused:
+            win.language.setFocus(Qt.TabFocusReason)
 
     def _open_hotkey_page(self) -> None:
         self.open_settings()
