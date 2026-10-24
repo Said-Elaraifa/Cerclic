@@ -1244,4 +1244,7 @@ T: dict = {
     'Cette combinaison sert à taper des caractères (@, €, #, œ…) avec AltGr. Choisis-en une autre.': 'تُستخدم هذه المجموعة لكتابة أحرف (@ و€ و# وœ…) باستخدام AltGr. اختر مجموعة أخرى.',
     # cerclic/win/hotkey.py:166
     "Ctrl + une seule touche sert déjà dans beaucoup d'applications (gras, copier, coller, enregistrer…). Ajoute Maj ou Alt, par exemple Ctrl + Maj + {key}.": 'الاختصار Ctrl مع مفتاح واحد مستخدم بالفعل في كثير من التطبيقات (غامق، نسخ، لصق، حفظ…). أضف Shift أو Alt، مثلًا Ctrl + Shift + {key}.',
+    # cerclic/ui/settings_window.py (À propos)
+    'Code source': 'الشيفرة المصدرية',
+    'Tout le code de Cerclic est public, sur GitHub.': 'كل شيفرة Cerclic متاحة للجميع على GitHub.',
 }

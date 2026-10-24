@@ -16,4 +16,4 @@ as dessiné ou importé une, et un journal technique servent uniquement au
 fonctionnement de l'application. Ils sont rangés dans le dossier de Cerclic sur
 ton ordinateur et disparaissent quand tu désinstalles Cerclic.
 
-Contact : [ton adresse e-mail de contact]
+Contact : https://github.com/Said-Elaraifa/Cerclic/issues

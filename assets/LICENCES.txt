@@ -1,4 +1,7 @@
-﻿Cerclic utilise des composants libres. Voici leurs licences et où trouver
+﻿Code source de Cerclic (libre, AGPL avec PyMuPDF) :
+  https://github.com/Said-Elaraifa/Cerclic
+
+Cerclic utilise des composants libres. Voici leurs licences et où trouver
 leur code source.
 
 Python 3.12 : licence PSF. https://www.python.org/

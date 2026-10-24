@@ -12,9 +12,9 @@ from __future__ import annotations
 import os
 import sys
 
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import (QColor, QGuiApplication, QKeySequence, QPainter, QPen,
-                           QPixmap, QShortcut)
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (QColor, QDesktopServices, QGuiApplication, QKeySequence,
+                           QPainter, QPen, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QButtonGroup, QFileDialog, QFrame, QHBoxLayout,
                                QLabel, QPushButton, QScrollArea, QSlider,
                                QStackedWidget, QVBoxLayout, QWidget)
@@ -27,6 +27,8 @@ from .glass import (SLIDER_QSS, Backdrop, Choice, GlassPanel, Group, KeyboardFoc
                     NavItem, Row, Select, Toggle, focus_ring, group_block, label, mirrored)
 from .theme import (ACCENT, BUTTON_QSS, ERROR, FOCUS_QSS, MUTED, OK, SCROLL_QSS, TEXT,
                     base_font)
+
+SOURCE_URL = "https://github.com/Said-Elaraifa/Cerclic"   # AGPL: the code, for everyone
 
 hk = hotkeys()            # this system's shortcut module (same names on both)
 
@@ -994,6 +996,10 @@ class SettingsWindow(QWidget):
         lic_btn.clicked.connect(self._open_licences)
         g.add(Row(tr("Licences"),
                   tr("Les composants libres qu'utilise Cerclic et leurs licences."), lic_btn))
+        src_btn = _button(tr("Voir"))
+        src_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(SOURCE_URL)))
+        g.add(Row(tr("Code source"), tr("Tout le code de Cerclic est public, sur GitHub."),
+                  src_btn))
         if IS_MAC:
             remove = _button(tr("Désinstaller…"))
             remove.clicked.connect(self._confirm_uninstall)

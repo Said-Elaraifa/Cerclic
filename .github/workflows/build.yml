@@ -155,6 +155,9 @@ jobs:
           python scripts/store/build.py
           Copy-Item dist_store/*.msix dist_installer/
           Copy-Item dist_store/*-test.zip dist_installer/
+          # texts, screenshots and tile icon for Partner Center
+          if (Test-Path dist_store/*-publication-Store.zip) { Copy-Item dist_store/*-publication-Store.zip dist_installer/ }
+          else { Write-Host "::warning::kit de publication Store absent (captures d'ecran)" }
 
       - name: Check the Store package with Microsoft's makeappx
         shell: pwsh
