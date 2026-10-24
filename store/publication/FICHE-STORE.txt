@@ -52,7 +52,7 @@ NOUVEAUTÉS DE CETTE VERSION
 ==============================================================================
 Cerclic arrive sur le Microsoft Store : « Cerclic » est maintenant
 directement dans le clic droit de Windows 11, sans passer par « Afficher
-d'autres options ».
+d'autres options ». Et Cerclic parle 10 langues : celle de Windows au départ.
 
 ==============================================================================
 FONCTIONNALITÉS DU PRODUIT (une par ligne)
@@ -118,10 +118,11 @@ How to test:
    the notification area.
 2. In File Explorer, right-click an image, a PDF, a video or an audio file and
    choose "Cerclic" (in the Windows 11 menu itself, no need for "Show more
-   options"). A ring of actions opens around the pointer. Pick one, for example "Pivoter" (rotate): a new file is created
+   options"). A ring of actions opens around the pointer. Pick one, for example "Rotate": a new file is created
    next to the original, which is never modified.
 3. Or select files and press Ctrl+Alt+Space.
-The interface is in French. All processing is local (bundled ffmpeg and
+The interface follows the Windows display language (10 languages, English
+for the others). All processing is local (bundled ffmpeg and
 PyMuPDF); the app does not use the network. Cerclic starts with Windows
 (startup task), which the user can turn off in its settings.
 
