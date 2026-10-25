@@ -3,6 +3,7 @@ name: Build Cerclic (Windows et Mac)
 on:
   push:
     branches: [main]
+    paths-ignore: ["kit-presse/**"]      # the press kit needs no build
     tags: ["v*"]
   workflow_dispatch:
     # Actions, « Run workflow », coche « publier » : la Release de la version
